@@ -124,7 +124,7 @@ program
   .description(
     "Datenordner und Werkzeuge in ~/.config/vibeshorts/config.json eintragen und die Datenbank anlegen"
   )
-  .requiredOption("--data-dir <path>", "Content-Ordner")
+  .option("--data-dir <path>", "Content-Ordner (Pflicht)")
   .option(
     "--db <path>",
     "SQLite-Datei (Standard <data-dir>/.vibeshorts/vibeshorts.db)"
@@ -137,15 +137,19 @@ program
   .action(
     run(
       (o: {
-        dataDir: string
+        dataDir?: string
         db?: string
         python?: string
         tiktokPull?: string
       }) => {
-        if (!fs.existsSync(o.dataDir))
-          throw new VSError("NOT_FOUND", `Datenordner fehlt: ${o.dataDir}`)
+        // --data-dir is also a global option; commander hands it to the program.
+        const dataDir = o.dataDir ?? g().dataDir
+        if (!dataDir)
+          throw new VSError("INVALID", "init braucht --data-dir <pfad>")
+        if (!fs.existsSync(dataDir))
+          throw new VSError("NOT_FOUND", `Datenordner fehlt: ${dataDir}`)
         const written = writeConfigFile({
-          dataDir: o.dataDir,
+          dataDir,
           dbPath: o.db,
           python: o.python,
           tiktokPullScript: o.tiktokPull,
