@@ -56,9 +56,14 @@ export const formatVersions = sqliteTable(
       .references(() => formats.id),
     version: integer("version").notNull(),
     description: text("description"),
-    slideStructure: text("slide_structure"),
+    /** Markdown guide: slide structure, production, acceptance */
+    guide: text("guide"),
     /** JSON object passed to the renderer, e.g. {"style":"native","text_scale":1.2} */
     rendererParams: text("renderer_params").notNull().default("{}"),
+    /** JSON array of tool skills an agent must load, e.g. ["bg-removal"] */
+    skills: text("skills").notNull().default("[]"),
+    /** JSON array of confirmed example posts, paths relative to the data dir */
+    examples: text("examples").notNull().default("[]"),
     changeNote: text("change_note"),
     actor: text("actor").notNull(),
     createdAt: createdAt(),

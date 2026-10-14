@@ -8,6 +8,20 @@
       "when": 1791984391012,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791996965515,
+      "tag": "0001_format_guide_skills_examples",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791997394611,
+      "tag": "0002_plan_format_follows_account",
+      "breakpoints": true
     }
   ]
 }

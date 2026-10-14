@@ -212,25 +212,85 @@ export function getFormat(ctx: Ctx, id: string) {
     .map((v) => ({
       ...v,
       rendererParams: parseJson<Record<string, unknown>>(v.rendererParams, {}),
+      skills: parseJson<string[]>(v.skills, []),
+      examples: parseJson<string[]>(v.examples, []),
     }))
   const current = versions.find((v) => v.version === f.currentVersion) ?? null
   return { ...f, current, versions }
 }
 
-export interface FormatInput {
+export type FormatFull = ReturnType<typeof getFormat>
+
+/** Fields of one format version that a new version or a correction can set. */
+export interface FormatVersionInput {
+  description?: string | null
+  /** Markdown: slide structure, production, acceptance */
+  guide?: string | null
+  rendererParams?: Record<string, unknown>
+  /** Tool skills an agent must load for this format */
+  skills?: string[]
+  /** Confirmed example posts, relative to the data dir (absolute paths inside it are accepted) */
+  examples?: string[]
+}
+
+export interface FormatInput extends FormatVersionInput {
   id?: string
   name: string
-  description?: string | null
   brandId?: string | null
-  slideStructure?: string | null
-  rendererParams?: Record<string, unknown>
+}
+
+function cleanSkills(skills: string[]) {
+  const out = [...new Set(skills.map((s) => s.trim()).filter(Boolean))]
+  for (const s of out)
+    if (!/^[a-z0-9][a-z0-9._:/-]*$/i.test(s))
+      throw new VSError("INVALID", `Ungültiger Skill-Name: ${s}`)
+  return out
+}
+
+function cleanExamples(ctx: Ctx, examples: string[]) {
+  const out: string[] = []
+  for (const raw of examples.map((e) => e.trim()).filter(Boolean)) {
+    const rel = raw.startsWith("/")
+      ? toRelative(ctx.config.dataDir, raw)
+      : raw.replace(/\/+$/, "")
+    if (!fs.existsSync(resolveInDataDir(ctx.config.dataDir, rel)))
+      throw new VSError("NOT_FOUND", `Beispiel nicht gefunden: ${rel}`)
+    if (!out.includes(rel)) out.push(rel)
+  }
+  return out
+}
+
+/** Version columns from the input; undefined fields stay undefined. */
+function versionValues(ctx: Ctx, input: FormatVersionInput) {
+  if (
+    input.rendererParams !== undefined &&
+    (input.rendererParams === null ||
+      typeof input.rendererParams !== "object" ||
+      Array.isArray(input.rendererParams))
+  )
+    throw new VSError("INVALID", "Renderer-Parameter müssen ein JSON-Objekt sein")
+  return {
+    description: input.description,
+    guide: input.guide,
+    rendererParams:
+      input.rendererParams === undefined
+        ? undefined
+        : json(input.rendererParams),
+    skills: input.skills === undefined ? undefined : json(cleanSkills(input.skills)),
+    examples:
+      input.examples === undefined
+        ? undefined
+        : json(cleanExamples(ctx, input.examples)),
+  }
 }
 
 export function createFormat(ctx: Ctx, input: FormatInput, actor: string) {
   const id = input.id ?? slugify(input.name)
+  if (!id) throw new VSError("INVALID", "Format braucht einen Namen")
   if (ctx.db.select().from(formats).where(eq(formats.id, id)).get()) {
     throw new VSError("CONFLICT", `Format ${id} existiert schon`)
   }
+  const v = versionValues(ctx, input)
   ctx.db
     .insert(formats)
     .values({
@@ -245,9 +305,11 @@ export function createFormat(ctx: Ctx, input: FormatInput, actor: string) {
     .values({
       formatId: id,
       version: 1,
-      description: input.description ?? null,
-      slideStructure: input.slideStructure ?? null,
-      rendererParams: json(input.rendererParams ?? {}),
+      description: v.description ?? null,
+      guide: v.guide ?? null,
+      rendererParams: v.rendererParams ?? "{}",
+      skills: v.skills ?? "[]",
+      examples: v.examples ?? "[]",
       changeNote: "Erste Version",
       actor,
     })
@@ -264,19 +326,13 @@ export function createFormat(ctx: Ctx, input: FormatInput, actor: string) {
 }
 
 /**
- * New format version. The previous version stays readable; its active rules are
- * carried over to the new version unless carryRules is false.
+ * New format version (pivot). The previous version stays readable; fields not
+ * given are taken over, and its active rules are carried over unless carryRules is false.
  */
 export function newFormatVersion(
   ctx: Ctx,
   id: string,
-  input: {
-    changeNote: string
-    description?: string | null
-    slideStructure?: string | null
-    rendererParams?: Record<string, unknown>
-    carryRules?: boolean
-  },
+  input: FormatVersionInput & { changeNote: string; carryRules?: boolean },
   actor: string
 ) {
   if (!input.changeNote?.trim())
@@ -286,16 +342,22 @@ export function newFormatVersion(
     )
   const f = getFormat(ctx, id)
   const prev = f.current
-  const version = Math.max(0, ...f.versions.map((v) => v.version)) + 1
+  const v = versionValues(ctx, input)
+  const version = Math.max(0, ...f.versions.map((x) => x.version)) + 1
   ctx.db
     .insert(formatVersions)
     .values({
       formatId: id,
       version,
-      description: input.description ?? prev?.description ?? null,
-      slideStructure: input.slideStructure ?? prev?.slideStructure ?? null,
-      rendererParams: json(input.rendererParams ?? prev?.rendererParams ?? {}),
-      changeNote: input.changeNote,
+      description:
+        v.description === undefined
+          ? (prev?.description ?? null)
+          : v.description,
+      guide: v.guide === undefined ? (prev?.guide ?? null) : v.guide,
+      rendererParams: v.rendererParams ?? json(prev?.rendererParams ?? {}),
+      skills: v.skills ?? json(prev?.skills ?? []),
+      examples: v.examples ?? json(prev?.examples ?? []),
+      changeNote: input.changeNote.trim(),
       actor,
     })
     .run()
@@ -335,7 +397,8 @@ export function newFormatVersion(
     id,
     {
       currentVersion: version,
-      description: input.description ?? f.description,
+      description:
+        v.description === undefined ? f.description : v.description,
     },
     actor,
     "version"
@@ -343,13 +406,40 @@ export function newFormatVersion(
   return getFormat(ctx, id)
 }
 
+/**
+ * Correct the format and its current version in place: no new version, no pivot.
+ * Each changed field lands in the history.
+ */
 export function updateFormat(
   ctx: Ctx,
   id: string,
-  patch: { name?: string; description?: string | null },
+  patch: FormatVersionInput & { name?: string },
   actor: string
 ) {
-  patchRow(ctx, formats, "format", id, patch, actor)
+  const f = getFormat(ctx, id)
+  if (patch.name !== undefined && !patch.name.trim())
+    throw new VSError("INVALID", "Format braucht einen Namen")
+  const v = versionValues(ctx, patch)
+  patchRow(
+    ctx,
+    formats,
+    "format",
+    id,
+    { name: patch.name?.trim(), description: v.description },
+    actor
+  )
+  if (f.current) {
+    const { description, guide, rendererParams, skills, examples } = v
+    patchRow(
+      ctx,
+      formatVersions,
+      "format_version",
+      f.current.id,
+      { description, guide, rendererParams, skills, examples },
+      actor,
+      "correct"
+    )
+  }
   return getFormat(ctx, id)
 }
 
@@ -667,8 +757,15 @@ export function updateAccount(
 ) {
   oneOf(patch.status, ACCOUNT_STATUS, "status")
   oneOf(patch.ctaRule, CTA_RULES, "cta")
-  if (patch.defaultFormatId)
-    getById(ctx, formats, patch.defaultFormatId, "Format")
+  const current = getAccount(ctx, id)
+  if (
+    patch.defaultFormatId !== undefined &&
+    patch.defaultFormatId !== current.defaultFormatId
+  )
+    throw new VSError(
+      "INVALID",
+      "Das aktive Format wechselt nur mit Begründung (accounts update --format <id> --reason <text>). Der Wechsel wird als Pivot gespeichert."
+    )
   if (patch.characterId)
     getById(ctx, characters, patch.characterId, "Charakter")
   if (

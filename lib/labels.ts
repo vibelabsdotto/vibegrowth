@@ -19,6 +19,13 @@ export const ACCOUNT_STATUS_LABEL: Record<string, string> = {
   planned: "geplant",
 }
 
+export const GUIDE_LABEL = "Leitfaden (Slide-Aufbau, Produktion, Abnahme)"
+
+export const FORMAT_SOURCE_LABEL: Record<string, string> = {
+  plan: "heute aus dem Planeintrag",
+  account: "Account",
+}
+
 export const CTA_LABEL: Record<string, string> = {
   none: "kein CTA",
   engagement: "nur Engagement",

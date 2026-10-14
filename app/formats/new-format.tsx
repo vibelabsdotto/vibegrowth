@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { createFormat } from "@/app/actions"
 import { FormDrawer } from "@/components/form-drawer"
 import { Button } from "@/components/ui/button"
+import { GUIDE_LABEL } from "@/lib/labels"
 
 export function NewFormat({
   brands,
@@ -33,10 +34,16 @@ export function NewFormat({
         },
         { name: "description", label: "Beschreibung", type: "textarea" },
         {
-          name: "slideStructure",
-          label: "Slide-Aufbau",
+          name: "guide",
+          label: GUIDE_LABEL,
           type: "textarea",
-          rows: 6,
+          rows: 10,
+          description: "Markdown",
+        },
+        {
+          name: "skills",
+          label: "Werkzeug-Skills",
+          description: "Kommagetrennt, z. B. pinterest, bg-removal",
         },
         {
           name: "rendererParams",

@@ -1,11 +1,9 @@
+import Link from "next/link"
 import { notFound } from "next/navigation"
-import {
-  getFormat,
-  listAccounts,
-  listImageErrors,
-  listRules,
-} from "@/core/catalog"
+import { getFormat, listImageErrors, listRules } from "@/core/catalog"
+import { accountsUsingFormat } from "@/core/context"
 import { VSError } from "@/core/util"
+import { Markdown } from "@/components/markdown"
 import { PageHeader } from "@/components/page-header"
 import { RulesCard } from "@/components/rules-card"
 import { Badge } from "@/components/ui/badge"
@@ -16,9 +14,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { actorLabel, fmtDateTime } from "@/lib/labels"
+import { localToday } from "@/lib/dates"
+import { actorLabel, fmtDateTime, GUIDE_LABEL } from "@/lib/labels"
 import { ctx } from "@/lib/server"
-import { ImageErrorsCard, NewVersion } from "./format-actions"
+import { CorrectFormat, ImageErrorsCard, NewVersion } from "./format-actions"
 
 export const dynamic = "force-dynamic"
 
@@ -44,8 +43,15 @@ export default async function FormatPage({
   })
   const allRules = listRules(c, { scopeType: "format", scopeId: id })
   const errors = listImageErrors(c, { formatId: id })
-  const users = listAccounts(c).filter((a) => a.defaultFormatId === id)
+  const users = accountsUsingFormat(c, id, localToday())
   const cur = f.current
+  const values = {
+    description: cur?.description ?? f.description ?? "",
+    guide: cur?.guide ?? "",
+    rendererParams: JSON.stringify(cur?.rendererParams ?? {}),
+    skills: (cur?.skills ?? []).join(", "),
+    examples: (cur?.examples ?? []).join("\n"),
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
@@ -53,19 +59,32 @@ export default async function FormatPage({
         title={f.name}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            <Badge>Version {f.currentVersion}</Badge> Accounts:{" "}
-            {users.map((a) => a.name).join(", ") || "–"}
+            <Badge>Version {f.currentVersion}</Badge> Aktiv bei:{" "}
+            {users.length
+              ? users.map((a, i) => (
+                  <span key={a.id}>
+                    <Link
+                      href={`/accounts/${a.id}`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {a.name}
+                    </Link>
+                    {a.source === "plan" ? " (heute laut Plan)" : ""}
+                    {i < users.length - 1 ? "," : ""}
+                  </span>
+                ))
+              : "keinem Account"}
           </span>
         }
         actions={
-          <NewVersion
-            id={f.id}
-            current={{
-              description: cur?.description ?? f.description ?? "",
-              slideStructure: cur?.slideStructure ?? "",
-              rendererParams: JSON.stringify(cur?.rendererParams ?? {}),
-            }}
-          />
+          <>
+            <CorrectFormat
+              id={f.id}
+              version={f.currentVersion}
+              current={{ ...values, name: f.name }}
+            />
+            <NewVersion id={f.id} current={values} />
+          </>
         }
       />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -86,10 +105,32 @@ export default async function FormatPage({
               </p>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground">Slide-Aufbau</div>
-              <p className="whitespace-pre-wrap">
-                {cur?.slideStructure ?? "–"}
-              </p>
+              <div className="text-xs text-muted-foreground">
+                Werkzeug-Skills
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {cur?.skills.length
+                  ? cur.skills.map((s) => (
+                      <Badge key={s} variant="secondary" className="font-mono">
+                        {s}
+                      </Badge>
+                    ))
+                  : "–"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Beispielposts</div>
+              {cur?.examples.length ? (
+                <ul className="mt-1 flex flex-col gap-0.5 font-mono text-xs">
+                  {cur.examples.map((e) => (
+                    <li key={e} className="break-all">
+                      {e}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>–</p>
+              )}
             </div>
             <div>
               <div className="text-xs text-muted-foreground">
@@ -141,6 +182,26 @@ export default async function FormatPage({
           </CardContent>
         </Card>
       </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>{GUIDE_LABEL}</CardTitle>
+          <CardDescription>
+            Version {f.currentVersion}
+            {cur?.guide
+              ? ` · ${cur.guide.length.toLocaleString("de-DE")} Zeichen`
+              : ""}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {cur?.guide ? (
+            <Markdown>{cur.guide}</Markdown>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Noch kein Leitfaden.
+            </p>
+          )}
+        </CardContent>
+      </Card>
       <RulesCard
         scopeType="format"
         scopeId={f.id}

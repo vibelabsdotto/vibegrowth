@@ -1,12 +1,12 @@
 import Link from "next/link"
 import {
   getFormat,
-  listAccounts,
   listBrands,
   listFormats,
   listImageErrors,
   listRules,
 } from "@/core/catalog"
+import { accountsUsingFormat } from "@/core/context"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -16,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { localToday } from "@/lib/dates"
 import { ctx } from "@/lib/server"
 import { NewFormat } from "./new-format"
 
@@ -25,7 +26,7 @@ export const metadata = { title: "Formate" }
 export default function FormatsPage() {
   const c = ctx()
   const formats = listFormats(c)
-  const accounts = listAccounts(c)
+  const today = localToday()
   const brands = listBrands(c)
 
   return (
@@ -52,7 +53,7 @@ export default function FormatsPage() {
             formatId: f.id,
             status: "active",
           })
-          const users = accounts.filter((a) => a.defaultFormatId === f.id)
+          const users = accountsUsingFormat(c, f.id, today)
           return (
             <Link
               key={f.id}
@@ -72,9 +73,12 @@ export default function FormatsPage() {
                     <Badge>Version {f.currentVersion}</Badge>
                     <Badge variant="outline">{rules.length} Regeln</Badge>
                     <Badge variant="outline">{errors.length} Bildfehler</Badge>
+                    {full.current?.guide ? null : (
+                      <Badge variant="destructive">ohne Leitfaden</Badge>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Accounts: {users.map((a) => a.name).join(", ") || "–"} ·
+                    Aktiv bei: {users.map((a) => a.name).join(", ") || "–"} ·
                     Renderer:{" "}
                     <span className="font-mono">
                       {JSON.stringify(full.current?.rendererParams ?? {})}

@@ -11,7 +11,7 @@ import {
   resolveConfig,
   writeConfigFile,
 } from "../core/config"
-import { buildContext } from "../core/context"
+import { accountsUsingFormat, activeFormat, buildContext } from "../core/context"
 import { appRoot, openDb, tx, type Ctx } from "../core/db"
 import { folderFor, openPath, renderPost } from "../core/files"
 import { importContent } from "../core/import"
@@ -108,6 +108,16 @@ const list = (v?: string) =>
     : undefined
 const nullable = (v?: string) =>
   v === undefined ? undefined : v === "" || v === "null" ? null : v
+
+function parseParams(raw: string): Record<string, unknown> {
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    throw new VSError("INVALID", "--params ist kein gültiges JSON")
+  }
+  return value as Record<string, unknown>
+}
 
 function readJsonInput(file?: string): unknown {
   const raw =
@@ -218,8 +228,17 @@ accountsCmd.command("show <id>").action(
   run((id: string) => {
     const c = ctx()
     const a = cat.getAccount(c, id)
+    const active = activeFormat(c, id)
     return {
       ...a,
+      activeFormat: active.format
+        ? {
+            id: active.format.id,
+            name: active.format.name,
+            version: active.format.currentVersion,
+            source: active.source,
+          }
+        : null,
       character: a.characterId ? cat.getCharacter(c, a.characterId) : null,
       rules: cat.listRules(c, {
         scopeType: "account",
@@ -239,7 +258,10 @@ function accountOptions(cmd: Command) {
     .option("--platform <platform>")
     .option("--language <lang>")
     .addOption(new Option("--status <status>").choices([...cat.ACCOUNT_STATUS]))
-    .option("--format <id>", "Standardformat")
+    .option(
+      "--format <id>",
+      "Aktives Format (beim Ändern Pflicht: --reason, wird als Pivot gespeichert)"
+    )
     .option("--mode <mode>", "z. B. autopilot, manual, test")
     .addOption(new Option("--cta <rule>").choices([...cat.CTA_RULES]))
     .option("--posts-per-day <n>", "Posts pro Tag", int)
@@ -302,13 +324,25 @@ accountOptions(
       { write: true }
     )
   )
-accountOptions(accountsCmd.command("update <id>")).action(
-  run(
-    (id: string, o: AccountOpts) =>
-      cat.updateAccount(ctx(), id, accountPatch(o), g().actor),
-    { write: true }
+accountOptions(accountsCmd.command("update <id>"))
+  .option("--reason <text>", "Begründung für den Wechsel des aktiven Formats")
+  .action(
+    run(
+      (id: string, o: AccountOpts & { reason?: string }) => {
+        const c = ctx()
+        const { defaultFormatId, ...rest } = accountPatch(o)
+        if (o.reason !== undefined && defaultFormatId === undefined)
+          throw new VSError("INVALID", "--reason gehört zu --format")
+        const pivot =
+          defaultFormatId === undefined
+            ? null
+            : know.setActiveFormat(c, id, defaultFormatId, o.reason, g().actor)
+        const account = cat.updateAccount(c, id, rest, g().actor)
+        return pivot ? { ...account, pivot } : account
+      },
+      { write: true }
+    )
   )
-)
 
 const charsCmd = program.command("characters").description("KI-Charaktere")
 charsCmd
@@ -395,6 +429,7 @@ formatsCmd.command("show <id>").action(
     const f = cat.getFormat(c, id)
     return {
       ...f,
+      activeAccounts: accountsUsingFormat(c, id),
       rules: cat.listRules(c, {
         scopeType: "format",
         scopeId: id,
@@ -404,75 +439,108 @@ formatsCmd.command("show <id>").action(
     }
   })
 )
-formatsCmd
-  .command("add <id>")
-  .requiredOption("--name <name>")
-  .option("--description <text>")
-  .option("--brand <id>")
-  .option("--slides <text>", "Slide-Aufbau")
-  .option("--params <json>", "Renderer-Parameter als JSON")
-  .action(
-    run(
-      (
-        id: string,
-        o: {
-          name: string
-          description?: string
-          brand?: string
-          slides?: string
-          params?: string
-        }
-      ) =>
-        cat.createFormat(
-          ctx(),
-          {
-            id,
-            name: o.name,
-            description: o.description,
-            brandId: o.brand,
-            slideStructure: o.slides,
-            rendererParams: o.params ? JSON.parse(o.params) : {},
-          },
-          g().actor
-        ),
-      { write: true }
+function formatOptions(cmd: Command) {
+  return cmd
+    .option("--description <text>")
+    .option(
+      "--guide <markdown>",
+      "Leitfaden als Markdown (Slide-Aufbau, Produktion, Abnahme)"
     )
-  )
-formatsCmd
-  .command("version <id>")
-  .description("Neue Formatversion (Pivot). Aktive Regeln werden übernommen.")
-  .requiredOption("--note <text>", "Begründung")
-  .option("--description <text>")
-  .option("--slides <text>")
-  .option("--params <json>")
-  .option("--no-carry-rules", "Regeln nicht übernehmen")
-  .action(
-    run(
-      (
-        id: string,
-        o: {
-          note: string
-          description?: string
-          slides?: string
-          params?: string
-          carryRules: boolean
-        }
-      ) =>
-        cat.newFormatVersion(
-          ctx(),
-          id,
-          {
-            changeNote: o.note,
-            description: o.description,
-            slideStructure: o.slides,
-            rendererParams: o.params ? JSON.parse(o.params) : undefined,
-            carryRules: o.carryRules,
-          },
-          g().actor
-        ),
-      { write: true }
+    .option("--guide-file <path>", "Leitfaden aus einer Datei lesen, - für stdin")
+    .addOption(new Option("--slides <text>", "alter Name für --guide").hideHelp())
+    .option(
+      "--skills <list>",
+      'Werkzeug-Skills, kommagetrennt, z. B. "pinterest,bg-removal" ("" = keine)'
     )
+    .option(
+      "--examples <paths>",
+      'bestätigte Beispielposts relativ zum Datenordner, kommagetrennt ("" = keine)'
+    )
+    .option("--params <json>", "Renderer-Parameter als JSON-Objekt")
+}
+type FormatOpts = {
+  description?: string
+  guide?: string
+  guideFile?: string
+  slides?: string
+  skills?: string
+  examples?: string
+  params?: string
+}
+function formatFields(o: FormatOpts): cat.FormatVersionInput {
+  const given = [o.guide, o.guideFile, o.slides].filter((v) => v !== undefined)
+  if (given.length > 1)
+    throw new VSError(
+      "INVALID",
+      "Leitfaden nur über eine Option: --guide, --guide-file oder --slides"
+    )
+  const guide =
+    o.guideFile !== undefined
+      ? fs.readFileSync(o.guideFile === "-" ? 0 : o.guideFile, "utf8")
+      : (o.guide ?? o.slides)
+  return {
+    description: nullable(o.description),
+    guide: guide === undefined ? undefined : guide.trim() ? guide : null,
+    rendererParams: o.params === undefined ? undefined : parseParams(o.params),
+    skills: o.skills === undefined ? undefined : (list(o.skills) ?? []),
+    examples: o.examples === undefined ? undefined : (list(o.examples) ?? []),
+  }
+}
+formatOptions(
+  formatsCmd
+    .command("add <id>")
+    .requiredOption("--name <name>")
+    .option("--brand <id>")
+).action(
+  run(
+    (id: string, o: FormatOpts & { name: string; brand?: string }) =>
+      cat.createFormat(
+        ctx(),
+        { id, name: o.name, brandId: o.brand, ...formatFields(o) },
+        g().actor
+      ),
+    { write: true }
   )
+)
+formatOptions(
+  formatsCmd
+    .command("version <id>")
+    .description(
+      "Neue Formatversion (Pivot). Nicht angegebene Felder und aktive Regeln werden übernommen."
+    )
+    .requiredOption("--note <text>", "Begründung")
+    .option("--no-carry-rules", "Regeln nicht übernehmen")
+).action(
+  run(
+    (id: string, o: FormatOpts & { note: string; carryRules: boolean }) =>
+      cat.newFormatVersion(
+        ctx(),
+        id,
+        { changeNote: o.note, carryRules: o.carryRules, ...formatFields(o) },
+        g().actor
+      ),
+    { write: true }
+  )
+)
+formatOptions(
+  formatsCmd
+    .command("update <id>")
+    .description(
+      "Format und aktuelle Version korrigieren, ohne neue Version und ohne Pivot"
+    )
+    .option("--name <name>")
+).action(
+  run(
+    (id: string, o: FormatOpts & { name?: string }) =>
+      cat.updateFormat(
+        ctx(),
+        id,
+        { name: o.name, ...formatFields(o) },
+        g().actor
+      ),
+    { write: true }
+  )
+)
 
 const rulesCmd = program
   .command("rules")
@@ -706,7 +774,10 @@ planCmd
 function entryOptions(cmd: Command) {
   return cmd
     .option("--date <date>", "YYYY-MM-DD, leer = Ideen-Pool")
-    .option("--format <id>")
+    .option(
+      "--format <id>",
+      'nur für ein abweichendes Format an diesem Tag; leer ("") = aktives Format des Accounts'
+    )
     .option("--topic <text>")
     .option("--angle <text>")
     .option("--hook-direction <text>")

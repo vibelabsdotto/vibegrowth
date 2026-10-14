@@ -13,9 +13,11 @@ VibeShorts ist die einzige Quelle für Accounts, Formate, Regeln, Bildfehler, Pl
 ## Morgenlauf pro Account
 
 1. `vibeshorts metrics pull --account <id> --actor cron:<id> --json`. Läuft schon ein Abruf, wartet der Aufruf und nutzt ihn mit. Fehler im Abruf stoppen den Lauf nicht.
-2. `vibeshorts context --account <id> --actor cron:<id> --json`. Enthält Format mit Version und Renderer-Parametern, aktive Regeln (Format, Account, Brand), Bildfehler, CTA-Regel, Learnings, Entscheidungen, `today`, `upcoming`, `ideas`, `recentPosts` mit Zahlen und `warnings`.
+2. `vibeshorts context --account <id> --actor cron:<id> --json`. Enthält das aktive Format in seiner aktuellen Version, aktive Regeln (Format, Account, Brand), Bildfehler, CTA-Regel, Learnings, Entscheidungen, `today`, `upcoming`, `ideas`, `recentPosts` mit Zahlen und `warnings`.
+   - `format` ist verbindlich. `format.source` sagt, woher es kommt: `plan` (Planeintrag des Tages setzt ein Format) oder `account` (aktives Format des Accounts). Kein anderes Format nehmen.
+   - `format.guide` ist der Leitfaden als Markdown (Slide-Aufbau, Produktion, Abnahme), `format.skills` die Werkzeug-Skills, die vor der Produktion zu laden sind, `format.examples` bestätigte Beispielposts relativ zum Datenordner.
 3. Thema: `today` nehmen. Ist `today` leer, selbst wählen und vor der Produktion mit `plan add --account <id> --date <heute> --topic … --rationale …` eintragen. Status während der Arbeit: `plan update <id> --status in_production`.
-4. Post bauen nach Format, Regeln und CTA-Regel. Jedes generierte Bild gegen `imageErrors` prüfen.
+4. Skills aus `format.skills` laden, Post nach `format.guide`, Regeln und CTA-Regel bauen. Jedes generierte Bild gegen `imageErrors` prüfen.
 5. `vibeshorts render --post <ordner>` (oder `--finalize <stem> --zip <name>.zip` für Canvas-Posts).
 6. `vibeshorts post register --account <id> --dir <ordner> --delivered`. Verknüpft den Eintrag des Tages und setzt ihn auf „geliefert“.
 7. Learnings nur mit Beleg: `learning add --account <id> --statement … --evidence "<Posts und Zahlen>"`.
@@ -28,7 +30,10 @@ Ist die CLI nicht erreichbar, mit dem letzten bekannten Stand weiterarbeiten und
 
 - Exit-Code `3` (`LOCKED`) heißt: Max hat den Eintrag angelegt oder gesperrt. Nicht umgehen, nicht neu anlegen, um ihn zu ersetzen.
 - Gewinner (ab 48 h mindestens 2× Median, `metrics.winners`): `hook add --account <id> --text … --mechanism … --winner --post <id>`, danach bis zu drei Varianten mit `hook variant <id>` und als Planeinträge mit `--hook-id`.
-- Pivots: `formats version <id> --note "<Begründung>"` und `decision add --pivot --title … --rationale …`.
+- Aktives Format eines Accounts wechseln: `accounts update <id> --format <format> --reason "<Begründung>"`. Legt die Pivot-Entscheidung automatisch an.
+- Format ändern als Pivot: `formats version <id> --note "<Begründung>" [--guide-file <md>] [--skills a,b] [--examples <pfad>,<pfad>]`. Nicht angegebene Felder übernimmt die neue Version.
+- Format korrigieren ohne neue Version: `formats update <id> --guide-file <md>` (ebenso `--description`, `--skills`, `--examples`, `--params`, `--name`). Für Tippfehler und Nachträge, nicht für inhaltliche Wechsel.
+- Planeinträge ohne `--format` folgen dem aktiven Format des Accounts. `--format` nur setzen, wenn genau dieser Tag ein anderes Format bekommen soll.
 - Neue Regel aus Max' Feedback: `rules add --account <id> --kind hook --text … --source "Max, <Datum>, Chat"`. Überholte Regel: `rules replace <id>`.
 - Links, die Max im Chat schickt: `inspo add <url> --account <id> --note …`. Planeinträge daraus mit `--inspiration <id>`.
 - Neuer Account: `accounts add <id> --brand <brand> --name … --handle … --format … --cta engagement`; Charakter mit `characters add <id> --account <id> …`, Referenzbilder mit `characters add-image <id> <pfad>`.

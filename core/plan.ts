@@ -140,7 +140,8 @@ export function addEntry(ctx: Ctx, input: EntryInput, actor: string) {
     .values({
       accountId: account.id,
       date: input.date ?? null,
-      formatId: input.formatId ?? account.defaultFormatId,
+      // null: follows the account's active format; a value overrides it for this entry
+      formatId: input.formatId ?? null,
       topic: input.topic.trim(),
       angle: input.angle ?? null,
       hookDirection: input.hookDirection ?? null,

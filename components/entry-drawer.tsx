@@ -89,7 +89,7 @@ function toValues(
   return {
     accountId,
     date: t.defaults.date ?? "",
-    formatId: accounts.find((a) => a.id === accountId)?.defaultFormatId ?? "",
+    formatId: "",
     topic: "",
     angle: "",
     hookDirection: "",
@@ -135,6 +135,10 @@ export function EntryDrawer({
   }
 
   const entry = shown?.mode === "edit" ? shown.entry : null
+  const activeFormatId = accounts.find(
+    (a) => a.id === values?.accountId
+  )?.defaultFormatId
+  const activeName = formats.find((f) => f.id === activeFormatId)?.name
   const set = <K extends keyof Values>(k: K, v: Values[K]) =>
     setValues((prev) => (prev ? { ...prev, [k]: v } : prev))
 
@@ -235,20 +239,7 @@ export function EntryDrawer({
                       id={id("account")}
                       value={values.accountId}
                       disabled={!!entry || pending}
-                      onChange={(e) => {
-                        const acc = accounts.find(
-                          (a) => a.id === e.target.value
-                        )
-                        setValues((p) =>
-                          p
-                            ? {
-                                ...p,
-                                accountId: e.target.value,
-                                formatId: acc?.defaultFormatId ?? p.formatId,
-                              }
-                            : p
-                        )
-                      }}
+                      onChange={(e) => set("accountId", e.target.value)}
                     >
                       {accounts.map((a) => (
                         <NativeSelectOption key={a.id} value={a.id}>
@@ -299,7 +290,9 @@ export function EntryDrawer({
                       disabled={pending}
                       onChange={(e) => set("formatId", e.target.value)}
                     >
-                      <NativeSelectOption value="">–</NativeSelectOption>
+                      <NativeSelectOption value="">
+                        Aktives Format{activeName ? ` (${activeName})` : ""}
+                      </NativeSelectOption>
                       {formats.map((f) => (
                         <NativeSelectOption key={f.id} value={f.id}>
                           {f.name}

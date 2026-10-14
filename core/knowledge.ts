@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, or } from "drizzle-orm"
 import type { Ctx } from "./db"
-import { oneOf } from "./catalog"
+import { getFormat, oneOf } from "./catalog"
 import {
   accounts,
   brands,
@@ -51,17 +51,69 @@ function checkScope(
   return scopeId
 }
 
-/** Scopes that apply to an account: the account itself, its brand, its format and global. */
-export function scopesFor(ctx: Ctx, accountId: string) {
+/**
+ * Scopes that apply to an account: the account itself, its brand, its format and global.
+ * formatId overrides the account's active format (e.g. the format of today's plan entry).
+ */
+export function scopesFor(
+  ctx: Ctx,
+  accountId: string,
+  formatId?: string | null
+) {
   const a = getById(ctx, accounts, accountId, "Account")
+  const format = formatId === undefined ? a.defaultFormatId : formatId
   return [
     { scopeType: "account", scopeId: a.id },
     { scopeType: "brand", scopeId: a.brandId },
-    ...(a.defaultFormatId
-      ? [{ scopeType: "format", scopeId: a.defaultFormatId }]
-      : []),
+    ...(format ? [{ scopeType: "format", scopeId: format }] : []),
     { scopeType: "global", scopeId: null },
   ]
+}
+
+const formatLabel = (f: { name: string; currentVersion: number } | null) =>
+  f ? `${f.name} (Version ${f.currentVersion})` : "keins"
+
+/**
+ * Switch an account's active format. A switch is a pivot: the reason is required
+ * and stored as a decision next to the change.
+ */
+export function setActiveFormat(
+  ctx: Ctx,
+  accountId: string,
+  formatId: string | null,
+  reason: string | null | undefined,
+  actor: string
+) {
+  const a = getById(ctx, accounts, accountId, "Account")
+  if (formatId === a.defaultFormatId) return null
+  const next = formatId ? getFormat(ctx, formatId) : null
+  if (!reason?.trim())
+    throw new VSError(
+      "INVALID",
+      "Ein Wechsel des aktiven Formats braucht eine Begründung (--reason). Er wird als Pivot gespeichert."
+    )
+  const prev = a.defaultFormatId ? getFormat(ctx, a.defaultFormatId) : null
+  patchRow(
+    ctx,
+    accounts,
+    "account",
+    accountId,
+    { defaultFormatId: formatId },
+    actor,
+    "format"
+  )
+  return addDecision(
+    ctx,
+    {
+      kind: "pivot",
+      scopeType: "account",
+      scopeId: accountId,
+      title: `Aktives Format: ${formatLabel(prev)} → ${formatLabel(next)}`,
+      rationale: reason,
+      source: "Formatwechsel",
+    },
+    actor
+  )
 }
 
 // ---------- learnings ----------
@@ -70,6 +122,8 @@ export function listLearnings(
   ctx: Ctx,
   f: {
     accountId?: string
+    /** with accountId: use this format instead of the account's active one */
+    formatId?: string | null
     status?: string
     scopeType?: string
     scopeId?: string
@@ -80,7 +134,7 @@ export function listLearnings(
   if (f.accountId) {
     conds.push(
       or(
-        ...scopesFor(ctx, f.accountId).map((s) =>
+        ...scopesFor(ctx, f.accountId, f.formatId).map((s) =>
           s.scopeId
             ? and(
                 eq(learnings.scopeType, s.scopeType),
@@ -182,10 +236,13 @@ export function setLearningStatus(
 
 // ---------- decisions ----------
 
-export function listDecisions(ctx: Ctx, f: { accountId?: string } = {}) {
+export function listDecisions(
+  ctx: Ctx,
+  f: { accountId?: string; formatId?: string | null } = {}
+) {
   const where = f.accountId
     ? or(
-        ...scopesFor(ctx, f.accountId).map((s) =>
+        ...scopesFor(ctx, f.accountId, f.formatId).map((s) =>
           s.scopeId
             ? and(
                 eq(decisions.scopeType, s.scopeType),

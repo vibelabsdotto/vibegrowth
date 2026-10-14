@@ -7,7 +7,7 @@ import {
   listFormats,
   listRules,
 } from "@/core/catalog"
-import { CTA_MEANING } from "@/core/context"
+import { activeFormat, CTA_MEANING } from "@/core/context"
 import { listDecisions, listLearnings } from "@/core/knowledge"
 import { accountStats } from "@/core/metrics"
 import { horizon, nextEntry } from "@/core/plan"
@@ -79,7 +79,9 @@ export default async function AccountPage({
     ? getCharacter(c, account.characterId)
     : null
   const formats = listFormats(c)
-  const format = formats.find((f) => f.id === account.defaultFormatId)
+  const today = localToday()
+  const active = activeFormat(c, id, today)
+  const accountFormat = formats.find((f) => f.id === account.defaultFormatId)
   const rules = listRules(c, {
     scopeType: "account",
     scopeId: id,
@@ -89,7 +91,6 @@ export default async function AccountPage({
   const decisions = listDecisions(c, { accountId: id })
   const stats = accountStats(c, id)
   const posts = listPosts(c, { accountId: id })
-  const today = localToday()
   const h = horizon(c, id, today, 21)
   const day = nextEntry(c, id, today)
   const unregistered = unregisteredPostDirs(c, id)
@@ -132,16 +133,34 @@ export default async function AccountPage({
         {[
           ["Modus", account.mode ?? "–"],
           ["CTA-Regel", CTA_LABEL[account.ctaRule] ?? account.ctaRule],
-          ["Format", format?.name ?? "–"],
+          [
+            "Aktives Format",
+            active.format ? (
+              <Link
+                href={`/formats/${active.format.id}`}
+                className="underline-offset-4 hover:underline"
+              >
+                {active.format.name} · Version {active.format.currentVersion}
+              </Link>
+            ) : (
+              "–"
+            ),
+            active.source === "plan"
+              ? `Heute aus dem Planeintrag. Account: ${accountFormat?.name ?? "keins"}`
+              : null,
+          ],
           [
             "Plan nächste 3 Wochen",
             `${h.filledDays}/${h.days} Tage${h.firstGap ? ` · Lücke ab ${fmtDate(h.firstGap)}` : ""}`,
           ],
-        ].map(([k, v]) => (
-          <Card key={k} size="sm">
+        ].map(([k, v, note]) => (
+          <Card key={String(k)} size="sm">
             <CardHeader>
               <CardDescription>{k}</CardDescription>
               <CardTitle className="text-base">{v}</CardTitle>
+              {note ? (
+                <CardDescription className="text-xs">{note}</CardDescription>
+              ) : null}
             </CardHeader>
           </Card>
         ))}

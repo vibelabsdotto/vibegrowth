@@ -8,7 +8,7 @@ Built for a setup where agents produce one post per account every morning and a 
 
 - **Calendar first.** Week, three-week and month views across all accounts, filter by brand and account. Drag entries to another day, edit, lock, skip or add them. Entries created or locked by the human are never overwritten by an agent.
 - **Agents plan ahead.** `plan fill` writes only free days, from entries the agent passes in or from its own idea pool. `context --account <id> --json` returns everything a run needs in one call.
-- **Formats are data.** Format versions carry renderer parameters and rules. A pivot is a new version with a reason, not a rewrite of agent instructions. Known image errors (with countermeasures) live next to them.
+- **Formats are data.** Format versions carry a Markdown guide, the tool skills an agent needs, confirmed example posts, renderer parameters and rules. A plan entry can override the account's active format for one day. A pivot is a new version with a reason, not a rewrite of agent instructions. Known image errors (with countermeasures) live next to them.
 - **Posts stay where they are.** Media files are never moved or renamed. The database stores paths relative to the content folder; "Open in Finder" opens the right folder.
 - **Numbers.** `metrics pull` fetches public TikTok stats per account, matches each TikTok post to a local post folder via a perceptual hash of slide 1, stores snapshots and derives 24 h / 48 h / 7 day plays, median and winners.
 - **Traceability.** Every rule, learning and decision has a source, a date and an actor. Every change lands in the history with before and after.
@@ -62,10 +62,10 @@ Every command accepts `--json` and `--actor <name>` (default `agent`, or `VIBESH
 
 | Command | Purpose |
 |---|---|
-| `context --account <id> [--date]` | Account, character, format with rules, image errors, CTA rule, active learnings and decisions, today's entry, upcoming plan, recent posts with numbers, warnings |
-| `accounts list\|show\|add\|update` | Accounts; `add` also creates the folder structure |
+| `context --account <id> [--date]` | Account, character, active format (current version with guide, skills and examples; `format.source` is `plan` or `account`) with rules, image errors, CTA rule, active learnings and decisions, today's entry, upcoming plan, recent posts with numbers, warnings |
+| `accounts list\|show\|add\|update` | Accounts; `add` also creates the folder structure. Changing the active format (`update --format <id> --reason <text>`) records a pivot decision |
 | `characters list\|show\|add\|update\|add-image` | AI characters and reference images |
-| `formats list\|show\|add\|version` | Formats; `version` starts a new version with a reason and carries active rules over |
+| `formats list\|show\|add\|version\|update` | Formats; `version` starts a new version with a reason and carries fields and active rules over, `update` corrects the current version in place. Versions carry a Markdown guide (`--guide`, `--guide-file`), tool skills (`--skills`), example posts (`--examples`) and renderer parameters |
 | `rules list\|add\|replace\|retire` | Rules for a format, account or brand, each with a source |
 | `image-errors list\|add\|update` | Known image errors with detection and countermeasure |
 | `plan list\|show\|next\|add\|update\|move\|lock\|skip\|delete\|fill\|horizon` | Content plan. `next` = entry of the day, `fill` = fill free days only |

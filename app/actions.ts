@@ -44,7 +44,36 @@ const tags = (v: unknown) =>
         .filter(Boolean)
     : undefined
 
+const lines = (v: unknown) =>
+  typeof v === "string"
+    ? v
+        .split(/[\n,]/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+    : undefined
+function params(v: unknown) {
+  const raw = s(v)
+  if (raw === undefined) return undefined
+  if (raw === null) return {}
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    throw new VSError("INVALID", "Renderer-Parameter sind kein gültiges JSON")
+  }
+}
+
 type Values = Record<string, unknown>
+
+/** Version fields of the format forms. Empty skills/examples clear the list. */
+function formatVersionValues(v: Values): cat.FormatVersionInput {
+  return {
+    description: s(v.description),
+    guide: s(v.guide),
+    rendererParams: params(v.rendererParams),
+    skills: tags(v.skills),
+    examples: lines(v.examples),
+  }
+}
 
 // ---------- plan ----------
 
@@ -200,16 +229,24 @@ export async function createAccount(v: Values) {
 }
 
 export async function saveAccount(id: string, v: Values) {
-  return act(() =>
-    cat.updateAccount(
-      ctx(),
+  return act(() => {
+    const c = ctx()
+    if (v.formatId !== undefined)
+      know.setActiveFormat(
+        c,
+        id,
+        s(v.formatId) ?? null,
+        s(v.formatReason),
+        WEB_ACTOR
+      )
+    return cat.updateAccount(
+      c,
       id,
       {
         name: s(v.name) ?? undefined,
         handle: s(v.handle),
         language: s(v.language),
         status: s(v.status) ?? undefined,
-        defaultFormatId: s(v.formatId),
         mode: s(v.mode),
         ctaRule: s(v.ctaRule) ?? undefined,
         postsPerDay: n(v.postsPerDay),
@@ -218,7 +255,7 @@ export async function saveAccount(id: string, v: Values) {
       },
       WEB_ACTOR
     )
-  )
+  })
 }
 
 export async function saveCharacter(id: string, v: Values) {
@@ -248,12 +285,8 @@ export async function createFormat(v: Values) {
       {
         id: s(v.id) ?? undefined,
         name: String(v.name ?? ""),
-        description: s(v.description),
         brandId: s(v.brandId),
-        slideStructure: s(v.slideStructure),
-        rendererParams: s(v.rendererParams)
-          ? JSON.parse(String(v.rendererParams))
-          : {},
+        ...formatVersionValues(v),
       },
       WEB_ACTOR
     )
@@ -267,13 +300,21 @@ export async function newFormatVersion(id: string, v: Values) {
       id,
       {
         changeNote: String(v.changeNote ?? ""),
-        description: s(v.description),
-        slideStructure: s(v.slideStructure),
-        rendererParams: s(v.rendererParams)
-          ? JSON.parse(String(v.rendererParams))
-          : undefined,
         carryRules: v.carryRules !== false,
+        ...formatVersionValues(v),
       },
+      WEB_ACTOR
+    )
+  )
+}
+
+/** Correct the current version in place: no new version, no pivot. */
+export async function correctFormat(id: string, v: Values) {
+  return act(() =>
+    cat.updateFormat(
+      ctx(),
+      id,
+      { name: s(v.name) ?? undefined, ...formatVersionValues(v) },
       WEB_ACTOR
     )
   )

@@ -5,6 +5,7 @@ import {
   listCharacters,
   listFormats,
 } from "@/core/catalog"
+import { activeFormat } from "@/core/context"
 import { accountStats } from "@/core/metrics"
 import { horizon } from "@/core/plan"
 import { listPosts } from "@/core/posts"
@@ -62,6 +63,7 @@ export default function AccountsPage() {
                 const ch = characters.find((x) => x.id === a.characterId)
                 const stats = accountStats(c, a.id)
                 const h = horizon(c, a.id, today, 21)
+                const active = activeFormat(c, a.id, today)
                 const postCount = listPosts(c, { accountId: a.id }).length
                 return (
                   <Link
@@ -132,9 +134,10 @@ export default function AccountsPage() {
                           </div>
                         </dl>
                         <p className="truncate text-xs text-muted-foreground">
-                          Format:{" "}
-                          {formats.find((f) => f.id === a.defaultFormatId)
-                            ?.name ?? "–"}
+                          Aktives Format:{" "}
+                          {active.format
+                            ? `${active.format.name} · v${active.format.currentVersion}${active.source === "plan" ? " (heute laut Plan)" : ""}`
+                            : "–"}
                         </p>
                       </CardContent>
                     </Card>

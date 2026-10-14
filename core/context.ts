@@ -3,6 +3,7 @@ import {
   getAccount,
   getCharacter,
   getFormat,
+  listAccounts,
   listImageErrors,
   listRules,
 } from "./catalog"
@@ -21,6 +22,42 @@ export const CTA_MEANING: Record<string, string> = {
 }
 
 /**
+ * The format an account works with on a date, always in its current version:
+ * the format set on the day's open plan entry, otherwise the account's active format.
+ */
+export function activeFormat(ctx: Ctx, accountId: string, date = today()) {
+  const account = getAccount(ctx, accountId)
+  const entry = nextEntry(ctx, accountId, date).entry
+  if (entry?.formatId)
+    return {
+      format: getFormat(ctx, entry.formatId),
+      source: "plan" as const,
+      planEntryId: entry.id,
+    }
+  return {
+    format: account.defaultFormatId
+      ? getFormat(ctx, account.defaultFormatId)
+      : null,
+    source: "account" as const,
+    planEntryId: null,
+  }
+}
+
+/** Accounts whose active format on the date is this format. */
+export function accountsUsingFormat(
+  ctx: Ctx,
+  formatId: string,
+  date = today()
+) {
+  return listAccounts(ctx).flatMap((a) => {
+    const active = activeFormat(ctx, a.id, date)
+    return active.format?.id === formatId
+      ? [{ id: a.id, name: a.name, status: a.status, source: active.source }]
+      : []
+  })
+}
+
+/**
  * Everything a morning run needs for one account in one call. Read-only.
  */
 export function buildContext(ctx: Ctx, accountId: string, date = today()) {
@@ -29,9 +66,8 @@ export function buildContext(ctx: Ctx, accountId: string, date = today()) {
   const character = account.characterId
     ? getCharacter(ctx, account.characterId)
     : null
-  const format = account.defaultFormatId
-    ? getFormat(ctx, account.defaultFormatId)
-    : null
+  const active = activeFormat(ctx, account.id, date)
+  const format = active.format
 
   const rules = {
     format: format
@@ -102,7 +138,9 @@ export function buildContext(ctx: Ctx, accountId: string, date = today()) {
   )
 
   const warnings: string[] = []
-  if (!format) warnings.push("Account hat kein Standardformat.")
+  if (!format) warnings.push("Account hat kein aktives Format.")
+  if (format && !format.current?.guide)
+    warnings.push(`Format ${format.name} hat keinen Leitfaden.`)
   if (!day.entry)
     warnings.push(
       `Kein offener Eintrag für ${date}. Thema selbst wählen und per "plan add" eintragen.`
@@ -126,9 +164,14 @@ export function buildContext(ctx: Ctx, accountId: string, date = today()) {
       ? {
           id: format.id,
           name: format.name,
-          description: format.description,
+          /** plan: set on today's plan entry; account: the account's active format */
+          source: active.source,
+          planEntryId: active.planEntryId,
           version: format.currentVersion,
-          slideStructure: format.current?.slideStructure ?? null,
+          description: format.current?.description ?? format.description,
+          guide: format.current?.guide ?? null,
+          skills: format.current?.skills ?? [],
+          examples: format.current?.examples ?? [],
           rendererParams: format.current?.rendererParams ?? {},
         }
       : null,
@@ -138,8 +181,15 @@ export function buildContext(ctx: Ctx, accountId: string, date = today()) {
     },
     rules,
     imageErrors,
-    learnings: listLearnings(ctx, { accountId: account.id, status: "active" }),
-    decisions: listDecisions(ctx, { accountId: account.id }).slice(0, 20),
+    learnings: listLearnings(ctx, {
+      accountId: account.id,
+      formatId: format?.id ?? null,
+      status: "active",
+    }),
+    decisions: listDecisions(ctx, {
+      accountId: account.id,
+      formatId: format?.id ?? null,
+    }).slice(0, 20),
     today: day.entry,
     todayAll: day.all,
     upcoming,

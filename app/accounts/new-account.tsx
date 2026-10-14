@@ -79,7 +79,7 @@ export function NewAccount({
         },
         {
           name: "formatId",
-          label: "Standardformat",
+          label: "Aktives Format",
           type: "select",
           options: [{ value: "", label: "–" }, ...formats],
         },

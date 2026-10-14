@@ -1,11 +1,12 @@
 "use client"
 
 import {
+  correctFormat,
   createImageError,
   newFormatVersion,
   setImageErrorStatus,
 } from "@/app/actions"
-import { FormDrawer } from "@/components/form-drawer"
+import { FormDrawer, type FieldSpec } from "@/components/form-drawer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,24 +18,55 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { toast } from "@/components/ui/toast"
-import { actorLabel } from "@/lib/labels"
+import { actorLabel, GUIDE_LABEL } from "@/lib/labels"
+
+type VersionValues = {
+  description: string
+  guide: string
+  rendererParams: string
+  skills: string
+  examples: string
+}
+
+const versionFields: FieldSpec[] = [
+  { name: "description", label: "Beschreibung", type: "textarea" },
+  {
+    name: "guide",
+    label: GUIDE_LABEL,
+    type: "textarea",
+    rows: 18,
+    description: "Markdown. Der Morgenlauf bekommt ihn vollständig.",
+  },
+  {
+    name: "skills",
+    label: "Werkzeug-Skills",
+    description:
+      "Kommagetrennt, z. B. pinterest, bg-removal. Der Agent lädt sie für dieses Format.",
+  },
+  {
+    name: "examples",
+    label: "Beispielposts",
+    type: "textarea",
+    rows: 3,
+    description: "Ein Pfad pro Zeile, relativ zum Datenordner.",
+  },
+  { name: "rendererParams", label: "Renderer-Parameter (JSON)" },
+]
+
+const wide = "sm:w-[min(48rem,calc(100vw-3rem))]"
 
 export function NewVersion({
   id,
   current,
 }: {
   id: string
-  current: {
-    description: string
-    slideStructure: string
-    rendererParams: string
-  }
+  current: VersionValues
 }) {
   return (
     <FormDrawer
       title="Neue Formatversion"
       description="Für einen Pivot. Die alte Version bleibt lesbar, aktive Regeln werden übernommen."
-      width="sm:w-[min(40rem,calc(100vw-3rem))]"
+      width={wide}
       trigger={(open) => (
         <Button size="sm" onClick={open}>
           Neue Version
@@ -49,14 +81,7 @@ export function NewVersion({
           required: true,
           rows: 3,
         },
-        { name: "description", label: "Beschreibung", type: "textarea" },
-        {
-          name: "slideStructure",
-          label: "Slide-Aufbau",
-          type: "textarea",
-          rows: 6,
-        },
-        { name: "rendererParams", label: "Renderer-Parameter (JSON)" },
+        ...versionFields,
         {
           name: "carryRules",
           label: "Aktive Regeln übernehmen",
@@ -65,6 +90,33 @@ export function NewVersion({
       ]}
       action={(v) => newFormatVersion(id, v)}
       successMessage="Neue Version angelegt"
+    />
+  )
+}
+
+export function CorrectFormat({
+  id,
+  version,
+  current,
+}: {
+  id: string
+  version: number
+  current: VersionValues & { name: string }
+}) {
+  return (
+    <FormDrawer
+      title={`Version ${version} korrigieren`}
+      description="Ändert die aktuelle Version direkt, ohne neue Version und ohne Pivot. Jede Änderung steht im Verlauf."
+      width={wide}
+      trigger={(open) => (
+        <Button size="sm" variant="outline" onClick={open}>
+          Korrigieren
+        </Button>
+      )}
+      initial={current}
+      fields={[{ name: "name", label: "Name", required: true }, ...versionFields]}
+      action={(v) => correctFormat(id, v)}
+      successMessage="Version korrigiert"
     />
   )
 }

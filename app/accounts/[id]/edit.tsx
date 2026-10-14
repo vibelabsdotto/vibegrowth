@@ -32,6 +32,7 @@ export function EditAccount({
         status: account.status,
         mode: account.mode ?? "",
         formatId: account.defaultFormatId ?? "",
+        formatReason: "",
         ctaRule: account.ctaRule,
         postsPerDay: String(account.postsPerDay),
         characterId: account.characterId ?? "",
@@ -54,9 +55,19 @@ export function EditAccount({
         },
         {
           name: "formatId",
-          label: "Standardformat",
+          label: "Aktives Format",
           type: "select",
           options: [{ value: "", label: "–" }, ...formats],
+          description:
+            "Die Crons nutzen immer dieses Format in seiner aktuellen Version, außer ein Planeintrag setzt ein anderes.",
+        },
+        {
+          name: "formatReason",
+          label: "Begründung für den Formatwechsel",
+          type: "textarea",
+          rows: 2,
+          description:
+            "Pflicht, wenn sich das aktive Format ändert. Wird als Pivot-Entscheidung gespeichert.",
         },
         {
           name: "ctaRule",

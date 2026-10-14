@@ -7,7 +7,8 @@ import { appRoot, type Ctx } from "./db"
 import { getAccount, getFormat } from "./catalog"
 import { getInspiration } from "./knowledge"
 import { getPost, registerPost } from "./posts"
-import { VSError } from "./util"
+import { planEntries } from "./schema"
+import { getById, VSError } from "./util"
 
 /** Open a folder inside the data dir in Finder (or the platform file manager). */
 export function openPath(ctx: Ctx, rel: string) {
@@ -108,8 +109,12 @@ export function renderPost(
     )
   } else {
     const account = getAccount(ctx, post.accountId)
-    const params = account.defaultFormatId
-      ? (getFormat(ctx, account.defaultFormatId).current?.rendererParams ?? {})
+    const entryFormat = post.planEntryId
+      ? getById(ctx, planEntries, post.planEntryId, "Planeintrag").formatId
+      : null
+    const formatId = entryFormat ?? account.defaultFormatId
+    const params = formatId
+      ? (getFormat(ctx, formatId).current?.rendererParams ?? {})
       : {}
     const merged = applyFormatParams(
       JSON.parse(fs.readFileSync(manifestPath, "utf8")),

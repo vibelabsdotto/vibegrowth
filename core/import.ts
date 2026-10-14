@@ -765,7 +765,7 @@ export function importContent(
               .values({
                 date: null,
                 accountId,
-                formatId: account.defaultFormatId,
+                formatId: null,
                 topic: angle,
                 angle: [id, t.heading].filter(Boolean).join(" · ") || null,
                 hookDirection: hook ? `Beispiel-Hook: ${hook}` : null,
@@ -822,7 +822,7 @@ export function importContent(
             .values({
               date,
               accountId,
-              formatId: account.defaultFormatId,
+              formatId: null,
               topic,
               angle: q.match(/^([A-Z]\d+)\b/)?.[1] ?? null,
               hookDirection: direction,
