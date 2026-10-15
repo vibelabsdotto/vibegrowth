@@ -1,10 +1,13 @@
+import { Inbox } from "lucide-react"
 import { ApprovalCard } from "@/components/growth/approval-card"
 import { APPROVAL_KIND_LABEL } from "@/components/growth/format"
-import { load } from "@/components/growth/server"
+import { load, projectScope } from "@/components/growth/server"
+import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
 import { EmptyState, SectionError } from "@/components/growth/status"
 import { UrlFilter, UrlToggle } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
-import type { Approval, Project } from "@/lib/growth-types"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import type { Approval } from "@/lib/growth-types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Wartet auf Max" }
@@ -15,7 +18,7 @@ const STATUS_QUERY: Record<string, string> = {
   all: "all",
 }
 
-type Search = { status?: string; project?: string; kind?: string }
+type Search = { status?: string; kind?: string }
 
 export default async function ApprovalsPage({
   searchParams,
@@ -24,16 +27,21 @@ export default async function ApprovalsPage({
 }) {
   const sp = await searchParams
   const status = sp.status && STATUS_QUERY[sp.status] ? sp.status : "pending"
-  const [res, projectsRes] = await Promise.all([
+  const scope = await projectScope()
+  const { project, projects } = scope
+  const [res, pendingRes] = await Promise.all([
     load<Approval[]>("/approvals", {
       status: STATUS_QUERY[status],
-      project: sp.project,
+      project: project || undefined,
       kind: sp.kind,
       limit: status === "pending" ? undefined : 200,
     }),
-    load<Project[]>("/projects"),
+    // The sidebar badge counts every project; say what the project filter hides.
+    project ? load<Approval[]>("/approvals", { status: "pending" }) : null,
   ])
-  const projects = projectsRes.data ?? []
+  const elsewhere = (pendingRes?.data ?? []).filter(
+    (a) => a.projectId !== project
+  ).length
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
   const rows = res.data ?? []
   const groups = new Map<string, Approval[]>()
@@ -45,14 +53,35 @@ export default async function ApprovalsPage({
   const ordered = [...groups.entries()].sort((a, b) =>
     name(a[0]).localeCompare(name(b[0]), "de")
   )
-  const params = { status: sp.status, project: sp.project, kind: sp.kind }
+  const params = { status: sp.status, kind: sp.kind }
 
   return (
     <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Wartet auf Max"
-        description="Vorschläge der Agents. Nur du entscheidest; die Notiz geht an den Agent zurück."
+        description={
+          <ScopeLabel project={project} name={scope.name}>
+            Vorschläge der Agents. Nur du entscheidest; die Notiz geht an den
+            Agent zurück.
+          </ScopeLabel>
+        }
       />
+      {elsewhere > 0 ? (
+        <Alert role="status">
+          <Inbox aria-hidden="true" />
+          <AlertDescription>
+            <p>
+              {elsewhere === 1
+                ? "1 weitere offene Freigabe"
+                : `${elsewhere} weitere offene Freigaben`}{" "}
+              in anderen Projekten.{" "}
+              <ScopeLink path="/approvals" project="">
+                Alle Projekte anzeigen
+              </ScopeLink>
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <UrlToggle
           param="status"
@@ -64,14 +93,6 @@ export default async function ApprovalsPage({
             { value: "decided", label: "Entschieden" },
             { value: "all", label: "Alle" },
           ]}
-        />
-        <UrlFilter
-          param="project"
-          value={sp.project ?? ""}
-          params={params}
-          label="Projekt"
-          allLabel="Alle Projekte"
-          options={projects.map((p) => ({ value: p.id, label: p.name }))}
         />
         <UrlFilter
           param="kind"
@@ -100,10 +121,18 @@ export default async function ApprovalsPage({
           }
           description={
             status === "pending"
-              ? "Sobald ein Agent etwas zur Freigabe stellt, erscheint es hier."
+              ? project
+                ? `Für ${scope.name} wartet nichts auf dich.`
+                : "Sobald ein Agent etwas zur Freigabe stellt, erscheint es hier."
               : "Für diese Filter gibt es keine Einträge."
           }
         />
+      ) : project ? (
+        <div className="flex flex-col gap-3">
+          {rows.map((a) => (
+            <ApprovalCard key={a.id} approval={a} />
+          ))}
+        </div>
       ) : (
         ordered.map(([projectId, items]) => (
           <section

@@ -12,19 +12,19 @@ import {
   METRIC_LABEL,
   actorLabel,
 } from "@/components/growth/format"
-import { list, load } from "@/components/growth/server"
+import { list, load, projectScope } from "@/components/growth/server"
+import { ProjectLinks, ScopeLabel } from "@/components/growth/scope"
 import {
   Delta,
   EmptyState,
   SectionError,
   VerdictToken,
 } from "@/components/growth/status"
-import { UrlFilter, UrlToggle } from "@/components/growth/url-filter"
+import { UrlToggle } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -38,12 +38,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { Change, Experiment, KpiRow, Project } from "@/lib/growth-types"
+import type { Change, Experiment, KpiRow } from "@/lib/growth-types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Experimente & Log" }
 
-type Search = { project?: string; range?: string }
+type Search = { range?: string }
 
 const RANGES: Record<string, number> = { "28": 28, "90": 90, "180": 180 }
 
@@ -53,47 +53,38 @@ export default async function ExperimentsPage({
   searchParams: Promise<Search>
 }) {
   const sp = await searchParams
-  const project = sp.project ?? ""
+  const scope = await projectScope()
+  const { project, projects } = scope
   const range = RANGES[sp.range ?? ""] ? sp.range! : "90"
   // Up to today, so a change logged today shows in the log and as a marker (today's numbers are still empty).
   const to = localToday()
   const from = addDays(to, -(RANGES[range] - 1))
 
-  const [expRes, projectsRes, changesRes] = await Promise.all([
+  // The traffic chart needs one project, so it only shows with a project chosen in the switcher.
+  const chartProject = project
+  const [expRes, changesRes, clicksRes, sessionsRes] = await Promise.all([
     load<Experiment[]>("/experiments", { project: project || undefined }),
-    load<Project[]>("/projects"),
     load<Change[]>("/changes", { project: project || undefined, from, to }),
-  ])
-  const projects = (projectsRes.data ?? []).filter(
-    (p) => p.status !== "archived"
-  )
-  const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
-  // The traffic chart needs one project; default to the one with the most logged changes.
-  const changeCount = (id: string) =>
-    (changesRes.data ?? []).filter((c) => c.projectId === id).length
-  const busiest = [...projects].sort(
-    (a, b) => changeCount(b.id) - changeCount(a.id)
-  )[0]
-  const chartProject = project || busiest?.id || ""
-  const [clicksRes, sessionsRes] = chartProject
-    ? await Promise.all([
-        load<KpiRow[]>("/kpi", {
+    chartProject
+      ? load<KpiRow[]>("/kpi", {
           project: chartProject,
           source: "gsc",
           metric: "clicks",
           from,
           to,
-        }),
-        load<KpiRow[]>("/kpi", {
+        })
+      : null,
+    chartProject
+      ? load<KpiRow[]>("/kpi", {
           project: chartProject,
           source: "ga4",
           metric: "sessions",
           from,
           to,
-        }),
-      ])
-    : [null, null]
-
+        })
+      : null,
+  ])
+  const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
   const totals = (rows: KpiRow[] | null | undefined) => {
     const m = new Map<string, number>()
     for (const r of list<KpiRow>(rows))
@@ -119,31 +110,25 @@ export default async function ExperimentsPage({
     .filter((c) => c.projectId === chartProject)
     .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
   const experiments = expRes.data ?? []
-  const params = { project: sp.project, range: sp.range }
+  const params = { range: sp.range }
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Experimente & Log"
-        description="Was wurde geändert, und hat es gewirkt?"
+        description={
+          <ScopeLabel project={project} name={scope.name}>
+            Was wurde geändert, und hat es gewirkt?
+          </ScopeLabel>
+        }
         actions={
-          <>
-            <UrlFilter
-              param="project"
-              value={project}
-              params={params}
-              label="Projekt"
-              allLabel="Alle Projekte"
-              options={projects.map((p) => ({ value: p.id, label: p.name }))}
-            />
-            <AddChange
-              projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-              project={project}
-              experiments={experiments
-                .filter((e) => e.status === "running")
-                .map((e) => ({ id: e.id, title: e.title }))}
-            />
-          </>
+          <AddChange
+            projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+            project={project}
+            experiments={experiments
+              .filter((e) => e.status === "running")
+              .map((e) => ({ id: e.id, title: e.title }))}
+          />
         }
       />
 
@@ -258,11 +243,6 @@ export default async function ExperimentsPage({
                 Tageswerte aus Search Console und GA4, Änderungen als
                 Markierung.
               </CardDescription>
-              {!project && projects.length > 1 ? (
-                <CardAction className="text-xs text-muted-foreground">
-                  Projekt oben wählen
-                </CardAction>
-              ) : null}
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {clicksRes?.error ? (
@@ -290,6 +270,19 @@ export default async function ExperimentsPage({
                   Keine Klick- oder Besuchsdaten im Zeitraum.
                 </p>
               )}
+            </CardContent>
+          </Card>
+        ) : projects.length ? (
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Klicks und Besuche</CardTitle>
+              <CardDescription>
+                Das Diagramm zeigt ein einzelnes Projekt. Projekt oben wählen
+                oder hier:
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProjectLinks path="/experiments" projects={projects} />
             </CardContent>
           </Card>
         ) : null}

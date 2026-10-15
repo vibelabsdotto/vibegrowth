@@ -1,42 +1,28 @@
 import { BacklogBoard } from "@/components/growth/backlog-board"
-import { load } from "@/components/growth/server"
+import { load, projectScope } from "@/components/growth/server"
+import { ScopeLabel } from "@/components/growth/scope"
 import { SectionError } from "@/components/growth/status"
-import { UrlFilter } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
-import type { BacklogItem, Project } from "@/lib/growth-types"
+import type { BacklogItem } from "@/lib/growth-types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Backlog" }
 
-export default async function BacklogPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>
-}) {
-  const sp = await searchParams
-  const project = sp.project ?? ""
-  const [res, projectsRes] = await Promise.all([
-    load<BacklogItem[]>("/backlog", { project: project || undefined }),
-    load<Project[]>("/projects"),
-  ])
-  const projects = (projectsRes.data ?? []).filter(
-    (p) => p.status !== "archived"
-  )
+export default async function BacklogPage() {
+  const scope = await projectScope()
+  const { project, projects } = scope
+  const res = await load<BacklogItem[]>("/backlog", {
+    project: project || undefined,
+  })
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Backlog"
-        description="Aufgaben aus Audit, Suche und Agents, nach Impact und Aufwand."
-        actions={
-          <UrlFilter
-            param="project"
-            value={project}
-            params={{ project: sp.project }}
-            label="Projekt"
-            allLabel="Alle Projekte"
-            options={projects.map((p) => ({ value: p.id, label: p.name }))}
-          />
+        description={
+          <ScopeLabel project={project} name={scope.name}>
+            Aufgaben aus Audit, Suche und Agents, nach Impact und Aufwand.
+          </ScopeLabel>
         }
       />
       {res.error !== null ? (

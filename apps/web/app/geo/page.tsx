@@ -10,9 +10,9 @@ import {
   MENTION_KIND_LABEL,
 } from "@/components/growth/format"
 import { MentionStatus } from "@/components/growth/mention-status"
-import { list, load } from "@/components/growth/server"
+import { list, load, projectScope } from "@/components/growth/server"
+import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
 import { EmptyState, SectionError } from "@/components/growth/status"
-import { UrlFilter } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -33,6 +33,7 @@ import {
 import type {
   GeoCheck,
   GeoQuestion,
+  GeoSummary,
   MentionTarget,
   Project,
 } from "@/lib/growth-types"
@@ -86,24 +87,33 @@ function tally(values: (string | null)[]) {
   )
 }
 
-export default async function GeoPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>
-}) {
-  const sp = await searchParams
-  const [projectsRes, allQuestionsRes] = await Promise.all([
-    load<Project[]>("/projects"),
-    sp.project ? null : load<GeoQuestion[]>("/geo/questions"),
-  ])
-  const projects = (projectsRes.data ?? []).filter(
-    (p) => p.status !== "archived"
-  )
-  // Without a choice, open the first project that has GEO questions.
-  const withQuestions = projects.find((p) =>
-    list<GeoQuestion>(allQuestionsRes?.data).some((q) => q.projectId === p.id)
-  )
-  const project = sp.project || withQuestions?.id || projects[0]?.id || ""
+const DESCRIPTION =
+  "Wird das Projekt in KI-Antworten genannt, und welche Quellen zitieren die Antworten?"
+
+export default async function GeoPage() {
+  const scope = await projectScope()
+  const { project, projectsRes } = scope
+  if (!project)
+    return (
+      <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
+        <PageHeader
+          title="GEO"
+          description={
+            <ScopeLabel project="" name={scope.name}>
+              {DESCRIPTION}
+            </ScopeLabel>
+          }
+        />
+        {projectsRes.error !== null ? (
+          <SectionError
+            title="Projekte nicht geladen"
+            error={projectsRes.error}
+          />
+        ) : (
+          <GeoAll projects={scope.projects} />
+        )}
+      </div>
+    )
   const [questionsRes, checksRes, mentionsRes] = project
     ? await Promise.all([
         load<GeoQuestion[]>("/geo/questions", { project }),
@@ -197,15 +207,10 @@ export default async function GeoPage({
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="GEO"
-        description="Wird das Projekt in KI-Antworten genannt, und welche Quellen zitieren die Antworten?"
-        actions={
-          <UrlFilter
-            param="project"
-            value={project}
-            params={{ project: sp.project }}
-            label="Projekt"
-            options={projects.map((p) => ({ value: p.id, label: p.name }))}
-          />
+        description={
+          <ScopeLabel project={project} name={scope.name}>
+            {DESCRIPTION}
+          </ScopeLabel>
         }
       />
       {projectsRes.error !== null ? (
@@ -504,6 +509,141 @@ export default async function GeoPage({
         </Card>
       ) : null}
     </div>
+  )
+}
+
+/** Alle Projekte: one compact row per project, the detail opens with the project chosen. */
+async function GeoAll({ projects }: { projects: Project[] }) {
+  const [mentionsRes, ...summaries] = await Promise.all([
+    load<MentionTarget[]>("/mentions", { status: "new,contacted" }),
+    ...projects.map((p) => load<GeoSummary>("/geo/summary", { project: p.id })),
+  ])
+  const openMentions = (id: string) =>
+    list<MentionTarget>(mentionsRes.data).filter(
+      (m) =>
+        m.projectId === id && (m.status === "new" || m.status === "contacted")
+    ).length
+  const rows = projects
+    .map((p, i) => {
+      const res = summaries[i]
+      const runs = [...(res.data?.runs ?? [])].sort((a, b) =>
+        b.date.localeCompare(a.date)
+      )
+      return {
+        project: p,
+        error: res.error,
+        questions: res.data?.questions.active ?? 0,
+        latest: runs[0] ?? null,
+        mentions: openMentions(p.id),
+      }
+    })
+    // Projects with GEO data first, then by name.
+    .sort(
+      (a, b) =>
+        Number(!!b.latest) - Number(!!a.latest) ||
+        Number(b.questions > 0) - Number(a.questions > 0) ||
+        a.project.name.localeCompare(b.project.name, "de")
+    )
+  if (!rows.length)
+    return (
+      <EmptyState
+        title="Keine aktiven Projekte"
+        description="Projekte legt ein Agent mit `vibegrowth projects add` an."
+      />
+    )
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Projekte</CardTitle>
+        <CardDescription>
+          Letzter Lauf je Projekt. Matrix, Konkurrenten und Quellen zeigt die
+          Projektansicht.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {mentionsRes.error !== null ? (
+          <SectionError
+            title="Erwähnungs-Ziele nicht geladen"
+            error={mentionsRes.error}
+          />
+        ) : null}
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Projekt</TableHead>
+                <TableHead className="text-right">Nennungsquote</TableHead>
+                <TableHead className="text-right">Ø Position</TableHead>
+                <TableHead className="text-right">Zitiert</TableHead>
+                <TableHead>Letzter Lauf</TableHead>
+                <TableHead className="text-right">Fragen</TableHead>
+                <TableHead className="text-right">Offene Ziele</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.project.id}>
+                  <TableCell>
+                    <ScopeLink
+                      path="/geo"
+                      project={r.project.id}
+                      className="font-medium underline-offset-4 hover:underline"
+                    >
+                      {r.project.name}
+                    </ScopeLink>
+                  </TableCell>
+                  {r.error !== null ? (
+                    <TableCell
+                      colSpan={6}
+                      className="whitespace-normal text-(--status-bad)"
+                    >
+                      {r.error}
+                    </TableCell>
+                  ) : (
+                    <>
+                      <TableCell className="text-right tabular-nums">
+                        {r.latest?.ok
+                          ? `${fmtPct(r.latest.mentioned / r.latest.ok, 0)} (${r.latest.mentioned}/${r.latest.ok})`
+                          : "–"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {fmtNum(r.latest?.avgPosition ?? null)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {r.latest?.citedRate != null
+                          ? fmtPct(r.latest.citedRate, 0)
+                          : "–"}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {r.latest ? (
+                          <>
+                            {fmtDate(r.latest.date)}
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {r.latest.engine}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {r.questions ? "noch kein Lauf" : "keine Fragen"}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {r.questions}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {r.mentions}
+                      </TableCell>
+                    </>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

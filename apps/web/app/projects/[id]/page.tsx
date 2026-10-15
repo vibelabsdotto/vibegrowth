@@ -211,7 +211,7 @@ export default async function ProjectPage({
               {approvals.length ? (
                 <CardAction>
                   <Link
-                    href={`/approvals?project=${pid}`}
+                    href="/approvals"
                     prefetch={false}
                     className="text-sm underline underline-offset-4"
                   >
@@ -255,7 +255,7 @@ export default async function ProjectPage({
               </CardDescription>
               <CardAction>
                 <Link
-                  href={`/experiments?project=${pid}`}
+                  href="/experiments"
                   prefetch={false}
                   className="text-sm underline underline-offset-4"
                 >
@@ -314,7 +314,7 @@ export default async function ProjectPage({
               </CardDescription>
               <CardAction>
                 <Link
-                  href={`/backlog?project=${pid}`}
+                  href="/backlog"
                   prefetch={false}
                   className="text-sm underline underline-offset-4"
                 >

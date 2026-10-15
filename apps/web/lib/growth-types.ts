@@ -349,3 +349,52 @@ export type StoreReview = {
   version: string | null
   reply: string | null
 }
+
+/** One run in GET /geo/summary (all checks of a date and engine). */
+export type GeoRunSummary = {
+  date: string
+  engine: string
+  checks: number
+  ok: number
+  errors: number
+  mentioned: number
+  mentionRate: number | null
+  avgPosition: number | null
+  citedRate: number | null
+  inSourcesRate: number | null
+}
+
+/** GET /geo/summary?project= (fields the web reads). */
+export type GeoSummary = {
+  project: string
+  questions: { total: number; active: number }
+  latest: string | null
+  runs: GeoRunSummary[]
+}
+
+export type WindowValue = {
+  value: number | null
+  prev: number | null
+  delta: number | null
+}
+
+/** GET /store/summary?project=&days= (fields the web reads). */
+export type StoreSummary = {
+  project: string
+  window: { from: string; to: string }
+  installs: WindowValue
+  stores: Record<
+    string,
+    {
+      source: string
+      hasData: boolean
+      installs: WindowValue
+      rating: { value: number; date: string } | null
+    }
+  >
+  reviews: {
+    total: number
+    avgRating: number | null
+    window: { count: number; avgRating: number | null }
+  }
+}

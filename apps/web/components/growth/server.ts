@@ -1,5 +1,7 @@
 import "server-only"
 import { ApiError, apiFetch } from "@/lib/api"
+import type { Project } from "@/lib/growth-types"
+import { selectedProject } from "@/lib/project-scope"
 
 type Query = Record<string, string | number | boolean | null | undefined>
 
@@ -31,6 +33,35 @@ export function list<T>(v: unknown, ...keys: string[]): T[] {
     }
   }
   return []
+}
+
+export type Scope = {
+  /** Result of GET /projects, for the error state. */
+  projectsRes: Loaded<Project[]>
+  /** Active (not archived) projects, the choices of the sidebar switcher. */
+  projects: Project[]
+  /** Project chosen in the switcher, "" = alle Projekte. Unknown or archived ids count as alle. */
+  project: string
+  /** Display name of the scope ("Alle Projekte" when none is chosen). */
+  name: string
+}
+
+/** Project scope of a page: the switcher cookie, validated against the project list. */
+export async function projectScope(): Promise<Scope> {
+  const [projectsRes, chosen] = await Promise.all([
+    load<Project[]>("/projects"),
+    selectedProject(),
+  ])
+  const projects = (projectsRes.data ?? []).filter(
+    (p) => p.status !== "archived"
+  )
+  const current = projects.find((p) => p.id === chosen)
+  return {
+    projectsRes,
+    projects,
+    project: current?.id ?? "",
+    name: current?.name ?? "Alle Projekte",
+  }
 }
 
 /** Request time for "vor X Std." labels; server components render once per request. */

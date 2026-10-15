@@ -1,4 +1,3 @@
-import Link from "next/link"
 import { FunnelCompact } from "@/components/growth/funnel"
 import {
   fmtAgo,
@@ -7,7 +6,7 @@ import {
   LIGHT_LABEL,
   PROJECT_KIND_LABEL,
 } from "@/components/growth/format"
-import { load, requestTime } from "@/components/growth/server"
+import { load, projectScope, requestTime } from "@/components/growth/server"
 import {
   EmptyState,
   LightBadge,
@@ -16,11 +15,15 @@ import {
 } from "@/components/growth/status"
 import { UrlToggle } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
+import { Badge } from "@/components/ui/badge"
 import type { Light, OverviewRow } from "@/lib/growth-types"
 import { cn } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Übersicht" }
+
+// Links from here change the project scope (?project=, cockpit). Plain anchors on purpose:
+// a full load re-renders the sidebar switcher, a client-side <Link> would leave it stale.
 
 const ORDER: Record<string, number> = { red: 0, yellow: 1, green: 2 }
 const REASON_TONE: Record<string, "bad" | "warn" | "neutral"> = {
@@ -36,7 +39,12 @@ export default async function OverviewPage({
 }) {
   const sp = await searchParams
   const days = sp.days === "28" ? 28 : 7
-  const res = await load<OverviewRow[]>("/overview", { days })
+  // Always every project: this page is the cross-project view. The switcher's project is highlighted.
+  const [res, scope] = await Promise.all([
+    load<OverviewRow[]>("/overview", { days }),
+    projectScope(),
+  ])
+  const selected = scope.project
   const rows = [...(res.data ?? [])].sort(
     (a, b) =>
       (ORDER[a.light] ?? 3) - (ORDER[b.light] ?? 3) ||
@@ -51,7 +59,7 @@ export default async function OverviewPage({
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Übersicht"
-        description={`Alle Projekte, letzte ${days} Tage gegen die ${days} Tage davor.`}
+        description={`Immer alle Projekte, letzte ${days} Tage gegen die ${days} Tage davor.`}
         actions={
           <UrlToggle
             param="days"
@@ -81,12 +89,12 @@ export default async function OverviewPage({
             <Stat
               label="Wartet auf Max"
               value={pending}
-              href={pending ? "/approvals" : undefined}
+              href={pending ? "/approvals?project=all" : undefined}
             />
             <Stat
               label="Laufende Experimente"
               value={running}
-              href={running ? "/experiments" : undefined}
+              href={running ? "/experiments?project=all" : undefined}
             />
           </div>
 
@@ -94,17 +102,26 @@ export default async function OverviewPage({
             {rows.map((r) => (
               <li
                 key={r.project.id}
-                className="grid min-w-0 grid-cols-1 gap-3 p-4 lg:grid-cols-[13rem_minmax(0,1fr)_13rem] lg:gap-6"
+                aria-current={r.project.id === selected ? "true" : undefined}
+                className={cn(
+                  "grid min-w-0 grid-cols-1 gap-3 p-4 first:rounded-t-xl last:rounded-b-xl lg:grid-cols-[13rem_minmax(0,1fr)_13rem] lg:gap-6",
+                  r.project.id === selected &&
+                    "bg-muted/50 shadow-[inset_3px_0_0_var(--foreground)]"
+                )}
               >
                 <div className="flex min-w-0 flex-col gap-1">
-                  <LightBadge light={r.light} />
-                  <Link
+                  <span className="flex flex-wrap items-center gap-2">
+                    <LightBadge light={r.light} />
+                    {r.project.id === selected ? (
+                      <Badge variant="secondary">Gewählt</Badge>
+                    ) : null}
+                  </span>
+                  <a
                     href={`/projects/${encodeURIComponent(r.project.id)}`}
-                    prefetch={false}
                     className="truncate font-medium underline-offset-4 hover:underline"
                   >
                     {r.project.name}
-                  </Link>
+                  </a>
                   <span className="truncate text-xs text-muted-foreground">
                     {label(PROJECT_KIND_LABEL, r.project.kind)}
                     {r.project.url
@@ -133,26 +150,32 @@ export default async function OverviewPage({
                   ) : null}
                 </div>
 
-                <dl className="grid content-start grid-cols-2 gap-x-3 gap-y-1 text-xs sm:grid-cols-4 lg:grid-cols-[auto_1fr]">
+                <dl className="grid grid-cols-2 content-start gap-x-3 gap-y-1 text-xs sm:grid-cols-4 lg:grid-cols-[auto_1fr]">
                   <dt className="text-muted-foreground">Freigaben</dt>
                   <dd className="tabular-nums">
                     {r.pendingApprovals ? (
-                      <Link
+                      <a
                         href={`/approvals?project=${encodeURIComponent(r.project.id)}`}
-                        prefetch={false}
                         className="font-medium underline underline-offset-4"
                       >
                         {r.pendingApprovals} offen
-                      </Link>
+                      </a>
                     ) : (
                       "keine"
                     )}
                   </dd>
                   <dt className="text-muted-foreground">Experimente</dt>
                   <dd className="tabular-nums">
-                    {r.runningExperiments
-                      ? `${r.runningExperiments} laufen`
-                      : "keine"}
+                    {r.runningExperiments ? (
+                      <a
+                        href={`/experiments?project=${encodeURIComponent(r.project.id)}`}
+                        className="underline underline-offset-4"
+                      >
+                        {r.runningExperiments} laufen
+                      </a>
+                    ) : (
+                      "keine"
+                    )}
                   </dd>
                   <dt className="text-muted-foreground">Letzter Abruf</dt>
                   <dd
@@ -209,13 +232,12 @@ function Stat({
     </>
   )
   return href ? (
-    <Link
+    <a
       href={href}
-      prefetch={false}
       className="flex flex-col gap-1 rounded-xl border bg-card p-3 transition-colors hover:bg-accent/40"
     >
       {body}
-    </Link>
+    </a>
   ) : (
     <div className="flex flex-col gap-1 rounded-xl border bg-card p-3">
       {body}

@@ -9,9 +9,9 @@ import {
   localToday,
   STORE_LABEL,
 } from "@/components/growth/format"
-import { list, load } from "@/components/growth/server"
+import { list, load, projectScope } from "@/components/growth/server"
+import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
 import { Delta, EmptyState, SectionError } from "@/components/growth/status"
-import { UrlFilter } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -34,6 +34,7 @@ import type {
   KpiRow,
   Project,
   StoreReview,
+  StoreSummary,
 } from "@/lib/growth-types"
 import { cn } from "@/lib/utils"
 
@@ -46,31 +47,32 @@ const STORES = [
   { source: "asc", label: "App Store" },
 ] as const
 
-export default async function StorePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ project?: string }>
-}) {
-  const sp = await searchParams
-  const [projectsRes, channelsRes] = await Promise.all([
-    load<Project[]>("/projects"),
-    sp.project ? null : load<Channel[]>("/channels"),
-  ])
-  const projects = (projectsRes.data ?? []).filter(
-    (p) => p.status !== "archived" && p.kind !== "website"
-  )
-  const allProjects = (projectsRes.data ?? []).filter(
-    (p) => p.status !== "archived"
-  )
-  // Without a choice, open the first project that has a live store listing.
-  const storeChannels = list<Channel>(channelsRes?.data).filter(
-    (c) => (c.kind === "android" || c.kind === "ios") && c.status === "active"
-  )
-  const withStore = projects.find((p) =>
-    storeChannels.some((c) => c.projectId === p.id)
-  )
-  const project =
-    sp.project || withStore?.id || projects[0]?.id || allProjects[0]?.id || ""
+const DESCRIPTION = `Installationen, Bewertung und Kampagnen der letzten ${DAYS} Tage.`
+
+export default async function StorePage() {
+  const scope = await projectScope()
+  const { project, projectsRes } = scope
+  if (!project)
+    return (
+      <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
+        <PageHeader
+          title="Store"
+          description={
+            <ScopeLabel project="" name={scope.name}>
+              {DESCRIPTION}
+            </ScopeLabel>
+          }
+        />
+        {projectsRes.error !== null ? (
+          <SectionError
+            title="Projekte nicht geladen"
+            error={projectsRes.error}
+          />
+        ) : (
+          <StoreAll projects={scope.projects} />
+        )}
+      </div>
+    )
   const to = addDays(localToday(), -1)
   const from = addDays(to, -(DAYS - 1))
   const prevFrom = addDays(from, -DAYS)
@@ -164,15 +166,10 @@ export default async function StorePage({
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Store"
-        description={`Installationen, Bewertung und Kampagnen der letzten ${DAYS} Tage.`}
-        actions={
-          <UrlFilter
-            param="project"
-            value={project}
-            params={{ project: sp.project }}
-            label="Projekt"
-            options={allProjects.map((p) => ({ value: p.id, label: p.name }))}
-          />
+        description={
+          <ScopeLabel project={project} name={scope.name}>
+            {DESCRIPTION}
+          </ScopeLabel>
         }
       />
       {projectsRes.error !== null ? (
@@ -356,6 +353,140 @@ export default async function StorePage({
         </>
       )}
     </div>
+  )
+}
+
+/** Alle Projekte: installs and rating per project; the detail opens with the project chosen. */
+async function StoreAll({ projects }: { projects: Project[] }) {
+  const [channelsRes, ...summaries] = await Promise.all([
+    load<Channel[]>("/channels"),
+    ...projects.map((p) =>
+      load<StoreSummary>("/store/summary", { project: p.id, days: DAYS })
+    ),
+  ])
+  const listings = list<Channel>(channelsRes.data).filter(
+    (c) => (c.kind === "android" || c.kind === "ios") && c.status === "active"
+  )
+  const rows = projects
+    .map((p, i) => {
+      const res = summaries[i]
+      const stores = Object.values(res.data?.stores ?? {})
+      return {
+        project: p,
+        error: res.error,
+        installs: res.data?.installs ?? null,
+        play: res.data?.stores.google_play?.rating ?? null,
+        asc: res.data?.stores.app_store?.rating ?? null,
+        reviews: res.data?.reviews.window ?? null,
+        hasData: stores.some((s) => s.hasData),
+        listed: listings.some((c) => c.projectId === p.id),
+      }
+    })
+    // Projects with store numbers first, then listed ones, then by name.
+    .sort(
+      (a, b) =>
+        Number(b.hasData) - Number(a.hasData) ||
+        Number(b.listed) - Number(a.listed) ||
+        a.project.name.localeCompare(b.project.name, "de")
+    )
+  if (!rows.length)
+    return (
+      <EmptyState
+        title="Keine aktiven Projekte"
+        description="Projekte legt ein Agent mit `vibegrowth projects add` an."
+      />
+    )
+  const rating = (r: { value: number } | null) =>
+    r ? (
+      <span className="inline-flex items-center gap-1">
+        {r.value.toLocaleString("de-DE", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 2,
+        })}
+        <Star aria-hidden="true" className="size-3 fill-current" />
+      </span>
+    ) : (
+      "–"
+    )
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Projekte</CardTitle>
+        <CardDescription>
+          Installationen der letzten {DAYS} Tage gegen die {DAYS} davor.
+          Kampagnen und Bewertungstexte zeigt die Projektansicht.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Projekt</TableHead>
+                <TableHead className="text-right">Installs {DAYS} T.</TableHead>
+                <TableHead className="text-right">Trend</TableHead>
+                <TableHead className="text-right">Bewertung Play</TableHead>
+                <TableHead className="text-right">
+                  Bewertung App Store
+                </TableHead>
+                <TableHead className="text-right">
+                  Bewertungen {DAYS} T.
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => (
+                <TableRow key={r.project.id}>
+                  <TableCell>
+                    <ScopeLink
+                      path="/store"
+                      project={r.project.id}
+                      className="font-medium underline-offset-4 hover:underline"
+                    >
+                      {r.project.name}
+                    </ScopeLink>
+                  </TableCell>
+                  {r.error !== null ? (
+                    <TableCell
+                      colSpan={5}
+                      className="whitespace-normal text-(--status-bad)"
+                    >
+                      {r.error}
+                    </TableCell>
+                  ) : !r.hasData && !r.reviews?.count ? (
+                    <TableCell colSpan={5} className="text-muted-foreground">
+                      {r.listed
+                        ? "Store-Eintrag, aber noch keine Zahlen"
+                        : "keine Store-Daten"}
+                    </TableCell>
+                  ) : (
+                    <>
+                      <TableCell className="text-right tabular-nums">
+                        {fmtNum(r.installs?.value)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Delta value={r.installs?.delta ?? null} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {rating(r.play)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {rating(r.asc)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {r.reviews?.count
+                          ? `${r.reviews.count} · Ø ${fmtNum(r.reviews.avgRating)}`
+                          : "–"}
+                      </TableCell>
+                    </>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

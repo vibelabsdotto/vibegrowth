@@ -73,13 +73,13 @@ export default async function ExperimentPage({
         title={e.title}
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Link
+            {/* Plain anchor: the cockpit switches the project scope, the sidebar must re-render. */}
+            <a
               href={`/projects/${encodeURIComponent(e.projectId)}`}
-              prefetch={false}
               className="underline underline-offset-4"
             >
               {projectName}
-            </Link>
+            </a>
             <span>· {metricName}</span>
             {e.target ? (
               <span>
