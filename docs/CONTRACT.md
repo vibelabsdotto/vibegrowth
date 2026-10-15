@@ -29,7 +29,7 @@ Die Produktionsdatenbank (`/Users/maxmannstein/VibeLabs/shortform-content/.vibes
 ## 2. Repo-Aufbau
 
 ```text
-apps/api/      NestJS 11 + drizzle + better-sqlite3. Port 4311 (Prod), bindet nur 127.0.0.1
+apps/api/      NestJS (aktuelle Stable) + drizzle + better-sqlite3. Port 4311 (Prod), bindet nur 127.0.0.1
   drizzle/     SQL-Migrationen + meta/_journal.json (inkl. der drei bestehenden 0000–0002)
   renderer/    Python-Renderer, TikTok-Zahlen-Abruf, OFL-Fonts (vorher renderer/)
   src/
@@ -39,7 +39,7 @@ apps/api/      NestJS 11 + drizzle + better-sqlite3. Port 4311 (Prod), bindet nu
     shorts/    ShortsModule: accounts, characters, formats, rules, image-errors, plan, posts, metrics, knowledge, hooks, inspo, history, context, render, import, media
     growth/    GrowthModule: projects, channels, collectors, kpi, funnel, overview, approvals, content, backlog, experiments, changes, geo, mentions, store, search, audit, context
     collectors/ CollectorsModule: ein Provider pro Collector (TS-Port von growth.py)
-apps/web/      Next.js 16 (bestehende App, ohne direkten DB-Zugriff). Port 4310, nur 127.0.0.1
+apps/web/      Next.js (bestehende Version, App, ohne direkten DB-Zugriff). Port 4310, nur 127.0.0.1
 apps/cli/      TypeScript + commander, mit esbuild zu dist/cli.mjs gebündelt (keine Laufzeit-Abhängigkeiten außer Node). bin: vibegrowth, vibeshorts
 docs/CONTRACT.md
 skills/vibegrowth/SKILL.md
