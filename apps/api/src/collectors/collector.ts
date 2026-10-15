@@ -12,6 +12,8 @@ export interface CollectorProject {
   url: string | null
   kind: string
   language: string | null
+  /** Working folder of the agents (geo-chatgpt: default evidence folder). */
+  workspace: string | null
   config: Record<string, unknown>
 }
 
@@ -22,6 +24,12 @@ export interface CollectorRunOptions {
   secretsDir: string | null
   /** Override "today" (YYYY-MM-DD). */
   today?: string
+  /** Active GEO questions of the project, ordered by id (geo-chatgpt). */
+  questions?: { id: number; text: string }[]
+  /** Only the first N questions (geo-chatgpt smoke test, POST /geo/run limit). */
+  limit?: number
+  /** Effective configs of the project's other collectors (e.g. play.package for geo-chatgpt). */
+  peers?: Record<string, Record<string, unknown>>
 }
 
 /**

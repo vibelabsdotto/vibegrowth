@@ -81,6 +81,7 @@ export function collectorProject(row: ProjectRow): CollectorProject {
     url: row.url,
     kind: row.kind,
     language: row.language,
+    workspace: row.workspace,
     config: jsonObject(row.config),
   }
 }

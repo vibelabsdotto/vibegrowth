@@ -1,21 +1,5 @@
-import { notPorted } from "../collector"
+import { fromSource } from "../collector"
+import { playCollector } from "../sources/play"
 
-/** Placeholder: source not ported yet, every run ends with ok:false. */
-export const play = notPorted({
-  id: "play",
-  label: "Google Play Console",
-  channelKinds: ["android"],
-  secrets: true,
-  configSchema: {
-    package: {
-      description: "Paketname der App, z. B. com.max.mannstein.dazeforprivate",
-      required: true,
-      type: "string",
-    },
-    gcsBucket: {
-      description: "Cloud-Storage-Bucket der Play-Berichte (pubsite_prod_…)",
-      required: true,
-      type: "string",
-    },
-  },
-})
+/** Play service account from GROWTH_PLAY_SA_JSON or ~/.playconsole-cli, not from secretsDir. */
+export const play = fromSource(playCollector, { secrets: false })

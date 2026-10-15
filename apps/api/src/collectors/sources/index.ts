@@ -9,6 +9,9 @@ import { ga4Collector } from './ga4.js';
 import { gscCollector } from './gsc.js';
 import { healthCollector } from './health.js';
 import { psiCollector } from './psi.js';
+import { appCollector } from './app.js';
+import { ascCollector } from './asc.js';
+import { playCollector } from './play.js';
 import type { SourceCollector } from './types.js';
 
 export * from './types.js';
@@ -18,6 +21,13 @@ export { collectGa4, type Ga4Config } from './ga4.js';
 export { collectGsc, type GscConfig } from './gsc.js';
 export { collectHealth, tlsDaysLeft, type HealthConfig } from './health.js';
 export { collectPsi, psiRun, type PsiConfig } from './psi.js';
+export { collectApp, appSetup, normaliseProperty, retentionCohorts, type AppConfig, type AppSetupResult } from './app.js';
+export { collectAsc, checkAsc, ASC_NO_PROFILE, type AscConfig, type AscCheck } from './asc.js';
+export { collectPlay, checkPlay, decodeExport, parseCsv, type PlayConfig, type PlayCheck } from './play.js';
+export { collectGeoChatgpt, analyseAnswer, brandMatcher, ownUrlKind, GEO_ENGINE, type GeoConfig, type GeoRunInput } from './geo.js';
+export { parseChatgptConversation, cleanUrl, EngineBlocked, PromptFailed } from './chatgpt.js';
+export { keywordSuggestions, sitemapSubmit, bingSubmit, type KeywordsResult, type SitemapStatus, type BingSubmitResult } from './search-actions.js';
+export { serviceAccountToken, playCredentialsPath, GCS_SCOPE } from './service-account.js';
 export { googleAccessToken, googleApi, GOOGLE_CLIENT_FILE, GOOGLE_TOKEN_FILE } from './google-auth.js';
 export { httpFetch, UA, BROWSER_UA, type HttpResponse, type HttpOptions } from './http.js';
 
@@ -29,6 +39,9 @@ export const SOURCE_COLLECTORS = {
   ga4: ga4Collector,
   bing: bingCollector,
   psi: psiCollector,
+  app: appCollector,
+  play: playCollector,
+  asc: ascCollector,
 } as const satisfies Record<string, SourceCollector<never>>;
 
 export type SourceCollectorId = keyof typeof SOURCE_COLLECTORS;

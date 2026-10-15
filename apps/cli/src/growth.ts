@@ -9,6 +9,7 @@ import {
   readText,
   run,
 } from "./common"
+import { geoRun, registerCollectorActions } from "./collector-actions"
 import { CliError, seg } from "./http"
 
 const PROJECT_KIND = ["app", "website", "tool", "other"]
@@ -973,10 +974,10 @@ export function registerGrowth(program: Command) {
     .description("Fragen im Automations-Chrome stellen (Collector geo-chatgpt)")
     .requiredOption("--project <id>")
     .option("--engine <engine>", "", "chatgpt-web")
+    .option("--limit <n>", "nur die ersten N Fragen (Probe)", int)
     .action(
       run(
-        (o: { project: string; engine: string }) =>
-          api.post("/geo/run", { project: o.project, engine: o.engine }, true),
+        (o: { project: string; engine: string; limit?: number }) => geoRun(o),
         { partial: true }
       )
     )
@@ -1042,4 +1043,6 @@ export function registerGrowth(program: Command) {
         })
       )
     )
+
+  registerCollectorActions(program)
 }

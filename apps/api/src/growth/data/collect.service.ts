@@ -1,12 +1,14 @@
 import { Injectable, Logger } from "@nestjs/common"
-import { and, eq, inArray, ne } from "drizzle-orm"
+import { and, asc, eq, inArray, ne } from "drizzle-orm"
 import type { CollectorDefinition } from "../../collectors/collector"
 import { CollectorRegistry } from "../../collectors/registry"
 import { errorMessage, type CollectorResult } from "../../collectors/sources"
 import { toolConfig } from "../../core/config"
-import { channels } from "../../core/schema"
+import { channels, geoQuestions } from "../../core/schema"
 import { nowIso, VGError } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
+import { GeoService } from "../work/geo.service"
+import { StoreService } from "../work/store.service"
 import { AuditService } from "./audit.service"
 import { collectorProject, CollectorsService } from "./collectors.service"
 import { KpiService, type ReplaceWindow } from "./kpi.service"
@@ -67,7 +69,9 @@ export class CollectService {
     private readonly collectors: CollectorsService,
     private readonly kpi: KpiService,
     private readonly search: SearchService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly geo: GeoService,
+    private readonly store: StoreService
   ) {}
 
   private get ctx() {
@@ -159,14 +163,19 @@ export class CollectService {
     projectId: string,
     collector: string,
     days: number,
-    actor: string
+    actor: string,
+    extra: { limit?: number } = {}
   ): Promise<RunOutcome> {
-    const key = `${projectId}\u0000${collector}`
+    const key = `${projectId}\u0000${collector}\u0000${extra.limit ?? ""}`
     const running = this.inflight.get(key)
     if (running) return running
-    const promise = this.execute(projectId, collector, days, actor).finally(
-      () => this.inflight.delete(key)
-    )
+    const promise = this.execute(
+      projectId,
+      collector,
+      days,
+      actor,
+      extra
+    ).finally(() => this.inflight.delete(key))
     this.inflight.set(key, promise)
     return promise
   }
@@ -175,7 +184,8 @@ export class CollectService {
     projectId: string,
     collector: string,
     days: number,
-    actor: string
+    actor: string,
+    extra: { limit?: number } = {}
   ): Promise<RunOutcome> {
     const def = this.registry.get(collector, "INVALID")
     const project = requireProject(this.ctx, projectId)
@@ -194,6 +204,7 @@ export class CollectService {
           days,
           actor,
           secretsDir,
+          ...this.runInputs(project, def, extra),
         })
       } catch (e) {
         result = failed(def, errorMessage(e))
@@ -207,6 +218,32 @@ export class CollectService {
       `${projectId}/${collector} ${outcome.ok ? "ok" : "Fehler"}: ${outcome.summary.slice(0, 160)}`
     )
     return outcome
+  }
+
+  /** Extra run inputs from the DB, read before the network part (no open transaction). */
+  private runInputs(
+    project: ProjectRow,
+    def: CollectorDefinition,
+    extra: { limit?: number }
+  ) {
+    if (def.id !== "geo-chatgpt") return {}
+    const questions = this.ctx.db
+      .select({ id: geoQuestions.id, text: geoQuestions.text })
+      .from(geoQuestions)
+      .where(
+        and(
+          eq(geoQuestions.projectId, project.id),
+          eq(geoQuestions.active, true)
+        )
+      )
+      .orderBy(asc(geoQuestions.id))
+      .all()
+    const peers: Record<string, Record<string, unknown>> = {}
+    for (const id of ["play", "asc"]) {
+      const peer = this.registry.find(id)
+      if (peer) peers[id] = this.collectors.effectiveConfig(project, peer)
+    }
+    return { questions, peers, limit: extra.limit }
   }
 
   /** The only channel of a kind the collector serves (e.g. the website), else null. */
@@ -226,7 +263,7 @@ export class CollectService {
     return rows.length === 1 ? rows[0].id : null
   }
 
-  /** Inside tx: kpi_daily, search_daily, audit tables, collector_runs + history. */
+  /** Inside tx: kpi_daily, search_daily, audit tables, geo_checks, store_reviews, collector_runs + history. */
   private write(
     project: ProjectRow,
     def: CollectorDefinition,
@@ -299,6 +336,27 @@ export class CollectService {
         project.id,
         meta.finishedAt,
         result.audit
+      )
+    }
+    // GeoService/StoreService open their own transaction: nested inside this one it is a savepoint.
+    if (result.geoChecks?.length) {
+      const r = this.geo.recordChecks(
+        result.geoChecks.map((c) => ({ ...c, projectId: project.id })),
+        meta.actor
+      )
+      written.geo = {
+        inserted: r.inserted,
+        updated: r.updated,
+        mentionTargets: {
+          created: r.mentionTargets.created.length,
+          updated: r.mentionTargets.updated,
+        },
+      }
+    }
+    if (result.storeReviews?.length) {
+      written.reviews = this.store.upsertReviews(
+        result.storeReviews.map((r) => ({ ...r, projectId: project.id })),
+        meta.actor
       )
     }
     const error = result.errors.length ? result.errors.join("; ") : null

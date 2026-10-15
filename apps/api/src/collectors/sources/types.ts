@@ -60,11 +60,55 @@ export interface CollectorContext {
   today?: string;
 }
 
+export interface GeoSourceRow {
+  url: string;
+  title: string;
+  domain: string;
+}
+
+/** One answer of an AI engine for one GEO question (`geo_checks`, written via GeoService.recordChecks). */
+export interface GeoCheckRow {
+  questionId: number;
+  date: string;
+  engine: string;
+  status: 'ok' | 'error';
+  mentioned?: boolean;
+  position?: number | null;
+  cited?: boolean;
+  inSources?: boolean;
+  brands?: string[];
+  competitors?: string[];
+  links?: string[];
+  citedUrls?: string[];
+  sources?: GeoSourceRow[];
+  answer?: string | null;
+  model?: string | null;
+  /** First evidence file (screenshot, else NN.json); all files in meta.evidenceFiles. */
+  evidence?: string | null;
+  meta?: Record<string, unknown>;
+  error?: string | null;
+}
+
+/** One store review (`store_reviews`, written via StoreService.upsertReviews). */
+export interface StoreReviewRow {
+  store: 'app_store' | 'google_play';
+  reviewId: string;
+  date?: string | null;
+  rating?: number | null;
+  title?: string | null;
+  body?: string | null;
+  language?: string | null;
+  version?: string | null;
+  reply?: string | null;
+}
+
 export interface CollectorResult {
   ok: boolean;
   kpi: KpiRow[];
   search?: SearchRow[];
   audit?: AuditResult;
+  geoChecks?: GeoCheckRow[];
+  storeReviews?: StoreReviewRow[];
   /**
    * Date window the source was asked for (inclusive). Rows of this source inside the window are
    * complete, so the writer may replace them (growth.py deletes GA4 event params from `start` on).
