@@ -5,10 +5,8 @@ import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { spawnSync } from "node:child_process"
 
+// The CLI talks to apps/api over HTTP (VIBEGROWTH_API_URL, default http://127.0.0.1:4311).
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
-// drizzle/ and renderer/ live in apps/api.
-process.env.VIBEGROWTH_APP_ROOT ??=
-  process.env.VIBESHORTS_APP_ROOT ?? join(root, "..", "api")
 const bundle = join(root, "dist", "cli.mjs")
 if (existsSync(bundle)) {
   await import(pathToFileURL(bundle).href)

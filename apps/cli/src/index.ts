@@ -1,40 +1,49 @@
 #!/usr/bin/env node
 import fs from "node:fs"
-import os from "node:os"
-import path from "node:path"
-import { spawn } from "node:child_process"
 import { Command, Option } from "commander"
-import * as cat from "../../api/src/core/catalog"
 import {
-  configFilePath,
-  ConfigError,
-  env,
-  resolveConfig,
-  writeConfigFile,
-} from "../../api/src/core/config"
-import { accountsUsingFormat, activeFormat, buildContext } from "../../api/src/core/context"
-import { appRoot, openDb, tx, type Ctx } from "../../api/src/core/db"
-import { folderFor, openPath, renderPost } from "../../api/src/core/files"
-import { importContent } from "../../api/src/core/import"
-import * as know from "../../api/src/core/knowledge"
-import { accountStats, postStats, pullMetrics } from "../../api/src/core/metrics"
-import * as plan from "../../api/src/core/plan"
-import {
-  getPost,
-  listPosts,
-  markPosted,
-  registerPost,
-  unregisteredPostDirs,
-} from "../../api/src/core/posts"
-import { VSError } from "../../api/src/core/util"
-import { printHuman } from "./print"
+  api,
+  fail,
+  g,
+  int,
+  list,
+  nullable,
+  parseJsonOption,
+  program,
+  projectAlias,
+  readJsonInput,
+  readText,
+  run,
+  cliName,
+} from "./common"
+import { configFilePath, resolvedDbPath, writeConfigFile } from "./config"
+import { registerGrowth } from "./growth"
+import { apiUrl, CliError, env, seg } from "./http"
+import { registerServe } from "./serve"
 
-/** "vibegrowth", or "vibeshorts" when called through the old name (kept as alias). */
-function cliName() {
-  return env("CLI_NAME") ?? "vibegrowth"
-}
+// Allowed values, as in apps/api/src/core (catalog, plan, knowledge).
+const ACCOUNT_STATUS = ["active", "paused", "planned"]
+const CTA_RULES = ["none", "engagement", "app"]
+const RULE_KINDS = [
+  "hook",
+  "copy",
+  "image",
+  "caption",
+  "cta",
+  "production",
+  "other",
+]
+const PLAN_STATUS = [
+  "idea",
+  "planned",
+  "in_production",
+  "delivered",
+  "posted",
+  "skipped",
+]
+const INSPO_TYPES = ["format", "hook", "sound", "visual", "topic", "trend"]
+const INSPO_STATUS = ["new", "analyzed", "adapted", "discarded"]
 
-const program = new Command()
 program
   .name(cliName())
   .description(
@@ -51,87 +60,6 @@ program
     "Datenordner (sonst VIBEGROWTH_DATA_DIR oder Config)"
   )
   .showHelpAfterError()
-
-type Globals = { json?: boolean; actor: string; dataDir?: string }
-const g = () => program.opts<Globals>()
-
-let ctxCache: Ctx | null = null
-function ctx() {
-  if (!ctxCache) ctxCache = openDb(resolveConfig({ dataDir: g().dataDir }))
-  return ctxCache
-}
-
-function out(value: unknown) {
-  if (g().json) process.stdout.write(JSON.stringify(value, null, 2) + "\n")
-  else printHuman(value)
-}
-
-function fail(e: unknown): never {
-  const code =
-    e instanceof VSError
-      ? e.code
-      : e instanceof ConfigError
-        ? "CONFIG"
-        : "ERROR"
-  const message = e instanceof Error ? e.message : String(e)
-  if (g().json)
-    process.stdout.write(
-      JSON.stringify({ error: { code, message } }, null, 2) + "\n"
-    )
-  else process.stderr.write(`Fehler (${code}): ${message}\n`)
-  process.exit(code === "LOCKED" ? 3 : 1)
-}
-
-/** Wrap an action: run it (writes inside one IMMEDIATE transaction), print, exit with status. */
-function run<A extends unknown[]>(
-  fn: (...args: A) => unknown,
-  opts: { write?: boolean } = {}
-) {
-  return async (...args: A) => {
-    try {
-      const result = opts.write
-        ? tx(ctx(), () => fn(...args))
-        : await fn(...args)
-      out(await result)
-    } catch (e) {
-      fail(e)
-    }
-  }
-}
-
-const int = (v: string) => {
-  const n = Number(v)
-  if (!Number.isInteger(n))
-    throw new VSError("INVALID", `Keine ganze Zahl: ${v}`)
-  return n
-}
-const list = (v?: string) =>
-  v
-    ? v
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : undefined
-const nullable = (v?: string) =>
-  v === undefined ? undefined : v === "" || v === "null" ? null : v
-
-function parseParams(raw: string): Record<string, unknown> {
-  let value: unknown
-  try {
-    value = JSON.parse(raw)
-  } catch {
-    throw new VSError("INVALID", "--params ist kein gültiges JSON")
-  }
-  return value as Record<string, unknown>
-}
-
-function readJsonInput(file?: string): unknown {
-  const raw =
-    file === "-" || !file
-      ? fs.readFileSync(0, "utf8")
-      : fs.readFileSync(file, "utf8")
-  return JSON.parse(raw)
-}
 
 // ---------- setup ----------
 
@@ -152,7 +80,7 @@ program
   )
   .action(
     run(
-      (o: {
+      async (o: {
         dataDir?: string
         db?: string
         python?: string
@@ -161,17 +89,41 @@ program
         // --data-dir is also a global option; commander hands it to the program.
         const dataDir = o.dataDir ?? g().dataDir
         if (!dataDir)
-          throw new VSError("INVALID", "init braucht --data-dir <pfad>")
+          throw new CliError("INVALID", "init braucht --data-dir <pfad>")
         if (!fs.existsSync(dataDir))
-          throw new VSError("NOT_FOUND", `Datenordner fehlt: ${dataDir}`)
+          throw new CliError("NOT_FOUND", `Datenordner fehlt: ${dataDir}`)
         const written = writeConfigFile({
           dataDir,
           dbPath: o.db,
           python: o.python,
           tiktokPullScript: o.tiktokPull,
         })
-        const c = openDb(resolveConfig())
-        return { config: configFilePath(), ...written, dbPath: c.config.dbPath }
+        // The API opens and migrates the database; init only checks whether it runs.
+        let apiStatus: unknown
+        try {
+          apiStatus = await api.get("/health")
+        } catch (e) {
+          apiStatus = {
+            ok: false,
+            url: apiUrl(),
+            error: e instanceof Error ? e.message : String(e),
+          }
+        }
+        const dbPath = resolvedDbPath(written)
+        const apiDb = (apiStatus as { dbPath?: string }).dbPath
+        return {
+          config: configFilePath(),
+          ...written,
+          dbPath,
+          api: apiStatus,
+          ...(apiDb && apiDb !== dbPath
+            ? {
+                warnings: [
+                  `Die laufende API nutzt ${apiDb}. Nach init die API neu starten, damit sie ${dbPath} nutzt.`,
+                ],
+              }
+            : {}),
+        }
       }
     )
   )
@@ -186,21 +138,9 @@ program
     "content-autopilot/references/accounts.json"
   )
   .action(
-    run((o: { accountsJson?: string }) => {
-      const c = ctx()
-      const key = "import.accounts_json"
-      const stored = c.sqlite
-        .prepare("SELECT value FROM settings WHERE key = ?")
-        .get(key) as { value: string } | undefined
-      const accountsJson = o.accountsJson ?? stored?.value ?? null
-      if (o.accountsJson)
-        c.sqlite
-          .prepare(
-            "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-          )
-          .run(key, o.accountsJson)
-      return importContent(c, { accountsJson })
-    })
+    run((o: { accountsJson?: string }) =>
+      api.post("/import", { accountsJson: o.accountsJson }, true)
+    )
   )
 
 program
@@ -208,68 +148,79 @@ program
   .description(
     "Alles für einen Morgenlauf: Account, Charakter, Format, Regeln, Bildfehler, CTA, Learnings, Entscheidungen, Eintrag des Tages, Posts mit Zahlen"
   )
-  .requiredOption("--account <id>")
+  .option("--account <id>")
+  .option(
+    "--project <id>",
+    "Growth-Kontext eines Projekts statt eines Accounts (Funnel, Freigaben, Content, Backlog, Experimente …)"
+  )
   .option("--date <YYYY-MM-DD>")
   .action(
-    run((o: { account: string; date?: string }) =>
-      buildContext(ctx(), o.account, o.date)
+    run(
+      (
+        o: { account?: string; project?: string; date?: string },
+        cmd: Command
+      ) => {
+        if (o.account === undefined && o.project === undefined)
+          cmd.error(
+            "error: required option '--account <id>' or '--project <id>' not specified"
+          )
+        if (o.account !== undefined && o.project !== undefined)
+          throw new CliError(
+            "INVALID",
+            "context nimmt --account oder --project, nicht beides"
+          )
+        return o.account !== undefined
+          ? api.get("/context", { account: o.account, date: o.date })
+          : projectContext(o.project!, o.date)
+      }
     )
   )
+
+/** Contract §7.5: GET /context?project=; older growth builds served /context/project. */
+async function projectContext(project: string, date?: string) {
+  try {
+    return await api.get("/context", { project, date })
+  } catch (e) {
+    if (
+      e instanceof CliError &&
+      e.code === "NOT_FOUND" &&
+      e.message.startsWith("Cannot GET")
+    )
+      return api.get("/context/project", { project, date })
+    throw e
+  }
+}
 
 // ---------- accounts & characters ----------
 
 const accountsCmd = program
   .command("accounts")
   .description("Accounts anzeigen und pflegen")
-accountsCmd
-  .command("list", { isDefault: true })
-  .option("--brand <id>")
+projectAlias(
+  accountsCmd.command("list", { isDefault: true }).option("--brand <id>")
+)
   .option("--status <status>")
   .action(
     run((o: { brand?: string; status?: string }) =>
-      cat.listAccounts(ctx(), { brandId: o.brand, status: o.status })
+      api.get("/accounts", { brand: o.brand, status: o.status })
     )
   )
-accountsCmd.command("show <id>").action(
-  run((id: string) => {
-    const c = ctx()
-    const a = cat.getAccount(c, id)
-    const active = activeFormat(c, id)
-    return {
-      ...a,
-      activeFormat: active.format
-        ? {
-            id: active.format.id,
-            name: active.format.name,
-            version: active.format.currentVersion,
-            source: active.source,
-          }
-        : null,
-      character: a.characterId ? cat.getCharacter(c, a.characterId) : null,
-      rules: cat.listRules(c, {
-        scopeType: "account",
-        scopeId: id,
-        status: "active",
-      }),
-      learnings: know.listLearnings(c, { accountId: id, status: "active" }),
-      stats: accountStats(c, id),
-      unregisteredPostDirs: unregisteredPostDirs(c, id),
-    }
-  })
-)
+accountsCmd
+  .command("show <id>")
+  .action(run((id: string) => api.get(`/accounts/${seg(id)}`)))
 function accountOptions(cmd: Command) {
   return cmd
     .option("--name <name>")
     .option("--handle <handle>")
     .option("--platform <platform>")
     .option("--language <lang>")
-    .addOption(new Option("--status <status>").choices([...cat.ACCOUNT_STATUS]))
+    .addOption(new Option("--status <status>").choices(ACCOUNT_STATUS))
     .option(
       "--format <id>",
       "Aktives Format (beim Ändern Pflicht: --reason, wird als Pivot gespeichert)"
     )
     .option("--mode <mode>", "z. B. autopilot, manual, test")
-    .addOption(new Option("--cta <rule>").choices([...cat.CTA_RULES]))
+    .addOption(new Option("--cta <rule>").choices(CTA_RULES))
     .option("--posts-per-day <n>", "Posts pro Tag", int)
     .option("--character <id>")
     .option("--notion-context <id>")
@@ -304,59 +255,46 @@ const accountPatch = (o: AccountOpts) => ({
   notes: nullable(o.notes),
 })
 accountOptions(
-  accountsCmd
-    .command("add <id>")
-    .description("Account samt Ordnerstruktur anlegen")
-    .requiredOption("--brand <id>")
+  projectAlias(
+    accountsCmd
+      .command("add <id>")
+      .description("Account samt Ordnerstruktur anlegen")
+      .requiredOption("--brand <id>")
+  )
 )
   .option(
     "--dir <path>",
     "Ordner relativ zum Datenordner (Standard <brand>/<id>)"
   )
   .action(
-    run(
-      (id: string, o: AccountOpts & { brand: string; dir?: string }) =>
-        cat.createAccount(
-          ctx(),
-          {
-            id,
-            brandId: o.brand,
-            dir: o.dir,
-            ...accountPatch(o),
-            name: o.name ?? id,
-          } as cat.AccountInput,
-          g().actor
-        ),
-      { write: true }
+    run((id: string, o: AccountOpts & { brand: string; dir?: string }) =>
+      api.post("/accounts", {
+        id,
+        brandId: o.brand,
+        dir: o.dir,
+        ...accountPatch(o),
+        name: o.name ?? id,
+      })
     )
   )
 accountOptions(accountsCmd.command("update <id>"))
   .option("--reason <text>", "Begründung für den Wechsel des aktiven Formats")
   .action(
-    run(
-      (id: string, o: AccountOpts & { reason?: string }) => {
-        const c = ctx()
-        const { defaultFormatId, ...rest } = accountPatch(o)
-        if (o.reason !== undefined && defaultFormatId === undefined)
-          throw new VSError("INVALID", "--reason gehört zu --format")
-        const pivot =
-          defaultFormatId === undefined
-            ? null
-            : know.setActiveFormat(c, id, defaultFormatId, o.reason, g().actor)
-        const account = cat.updateAccount(c, id, rest, g().actor)
-        return pivot ? { ...account, pivot } : account
-      },
-      { write: true }
-    )
+    run((id: string, o: AccountOpts & { reason?: string }) => {
+      const patch = accountPatch(o)
+      if (o.reason !== undefined && patch.defaultFormatId === undefined)
+        throw new CliError("INVALID", "--reason gehört zu --format")
+      return api.patch(`/accounts/${seg(id)}`, { ...patch, reason: o.reason })
+    })
   )
 
 const charsCmd = program.command("characters").description("KI-Charaktere")
 charsCmd
   .command("list", { isDefault: true })
-  .action(run(() => cat.listCharacters(ctx())))
+  .action(run(() => api.get("/characters")))
 charsCmd
   .command("show <id>")
-  .action(run((id: string) => cat.getCharacter(ctx(), id)))
+  .action(run((id: string) => api.get(`/characters/${seg(id)}`)))
 function charOptions(cmd: Command) {
   return cmd
     .option("--name <name>")
@@ -385,39 +323,29 @@ const charPatch = (o: CharOpts) => ({
   dos: nullable(o.dos),
   donts: nullable(o.donts),
 })
-charOptions(charsCmd.command("add <id>"))
+projectAlias(charOptions(charsCmd.command("add <id>")))
   .option("--account <id>", "gleich diesem Account zuordnen")
   .action(
-    run(
-      (id: string, o: CharOpts & { account?: string }) => {
-        const c = ctx()
-        const ch = cat.createCharacter(
-          c,
-          { id, ...charPatch(o), name: o.name ?? id },
-          g().actor
-        )
-        if (o.account)
-          cat.updateAccount(c, o.account, { characterId: ch.id }, g().actor)
-        return ch
-      },
-      { write: true }
+    run((id: string, o: CharOpts & { account?: string }) =>
+      api.post("/characters", {
+        id,
+        ...charPatch(o),
+        name: o.name ?? id,
+        account: o.account,
+      })
     )
   )
-charOptions(charsCmd.command("update <id>")).action(
-  run(
-    (id: string, o: CharOpts) =>
-      cat.updateCharacter(ctx(), id, charPatch(o), g().actor),
-    { write: true }
+projectAlias(charOptions(charsCmd.command("update <id>"))).action(
+  run((id: string, o: CharOpts) =>
+    api.patch(`/characters/${seg(id)}`, charPatch(o))
   )
 )
 charsCmd
   .command("add-image <id> <path>")
   .description("Referenzbild anhängen (Pfad im Datenordner)")
   .action(
-    run(
-      (id: string, p: string) =>
-        cat.addCharacterImage(ctx(), id, p.startsWith("/") ? p : p, g().actor),
-      { write: true }
+    run((id: string, p: string) =>
+      api.post(`/characters/${seg(id)}/images`, { path: p })
     )
   )
 
@@ -428,23 +356,10 @@ const formatsCmd = program
   .description("Formate mit Versionen")
 formatsCmd
   .command("list", { isDefault: true })
-  .action(run(() => cat.listFormats(ctx())))
-formatsCmd.command("show <id>").action(
-  run((id: string) => {
-    const c = ctx()
-    const f = cat.getFormat(c, id)
-    return {
-      ...f,
-      activeAccounts: accountsUsingFormat(c, id),
-      rules: cat.listRules(c, {
-        scopeType: "format",
-        scopeId: id,
-        formatVersion: f.currentVersion,
-      }),
-      imageErrors: cat.listImageErrors(c, { formatId: id }),
-    }
-  })
-)
+  .action(run(() => api.get("/formats")))
+formatsCmd
+  .command("show <id>")
+  .action(run((id: string) => api.get(`/formats/${seg(id)}`)))
 function formatOptions(cmd: Command) {
   return cmd
     .option("--description <text>")
@@ -452,8 +367,13 @@ function formatOptions(cmd: Command) {
       "--guide <markdown>",
       "Leitfaden als Markdown (Slide-Aufbau, Produktion, Abnahme)"
     )
-    .option("--guide-file <path>", "Leitfaden aus einer Datei lesen, - für stdin")
-    .addOption(new Option("--slides <text>", "alter Name für --guide").hideHelp())
+    .option(
+      "--guide-file <path>",
+      "Leitfaden aus einer Datei lesen, - für stdin"
+    )
+    .addOption(
+      new Option("--slides <text>", "alter Name für --guide").hideHelp()
+    )
     .option(
       "--skills <list>",
       'Werkzeug-Skills, kommagetrennt, z. B. "pinterest,bg-removal" ("" = keine)'
@@ -473,39 +393,41 @@ type FormatOpts = {
   examples?: string
   params?: string
 }
-function formatFields(o: FormatOpts): cat.FormatVersionInput {
+function formatFields(o: FormatOpts) {
   const given = [o.guide, o.guideFile, o.slides].filter((v) => v !== undefined)
   if (given.length > 1)
-    throw new VSError(
+    throw new CliError(
       "INVALID",
       "Leitfaden nur über eine Option: --guide, --guide-file oder --slides"
     )
   const guide =
-    o.guideFile !== undefined
-      ? fs.readFileSync(o.guideFile === "-" ? 0 : o.guideFile, "utf8")
-      : (o.guide ?? o.slides)
+    o.guideFile !== undefined ? readText(o.guideFile) : (o.guide ?? o.slides)
   return {
     description: nullable(o.description),
     guide: guide === undefined ? undefined : guide.trim() ? guide : null,
-    rendererParams: o.params === undefined ? undefined : parseParams(o.params),
+    rendererParams:
+      o.params === undefined
+        ? undefined
+        : parseJsonOption(o.params, "--params"),
     skills: o.skills === undefined ? undefined : (list(o.skills) ?? []),
     examples: o.examples === undefined ? undefined : (list(o.examples) ?? []),
   }
 }
 formatOptions(
-  formatsCmd
-    .command("add <id>")
-    .requiredOption("--name <name>")
-    .option("--brand <id>")
+  projectAlias(
+    formatsCmd
+      .command("add <id>")
+      .requiredOption("--name <name>")
+      .option("--brand <id>")
+  )
 ).action(
-  run(
-    (id: string, o: FormatOpts & { name: string; brand?: string }) =>
-      cat.createFormat(
-        ctx(),
-        { id, name: o.name, brandId: o.brand, ...formatFields(o) },
-        g().actor
-      ),
-    { write: true }
+  run((id: string, o: FormatOpts & { name: string; brand?: string }) =>
+    api.post("/formats", {
+      id,
+      name: o.name,
+      brandId: o.brand,
+      ...formatFields(o),
+    })
   )
 )
 formatOptions(
@@ -517,15 +439,12 @@ formatOptions(
     .requiredOption("--note <text>", "Begründung")
     .option("--no-carry-rules", "Regeln nicht übernehmen")
 ).action(
-  run(
-    (id: string, o: FormatOpts & { note: string; carryRules: boolean }) =>
-      cat.newFormatVersion(
-        ctx(),
-        id,
-        { changeNote: o.note, carryRules: o.carryRules, ...formatFields(o) },
-        g().actor
-      ),
-    { write: true }
+  run((id: string, o: FormatOpts & { note: string; carryRules: boolean }) =>
+    api.post(`/formats/${seg(id)}/versions`, {
+      changeNote: o.note,
+      carryRules: o.carryRules,
+      ...formatFields(o),
+    })
   )
 )
 formatOptions(
@@ -536,26 +455,21 @@ formatOptions(
     )
     .option("--name <name>")
 ).action(
-  run(
-    (id: string, o: FormatOpts & { name?: string }) =>
-      cat.updateFormat(
-        ctx(),
-        id,
-        { name: o.name, ...formatFields(o) },
-        g().actor
-      ),
-    { write: true }
+  run((id: string, o: FormatOpts & { name?: string }) =>
+    api.patch(`/formats/${seg(id)}`, { name: o.name, ...formatFields(o) })
   )
 )
 
 const rulesCmd = program
   .command("rules")
   .description("Regeln für Format, Account oder Brand")
-rulesCmd
-  .command("list", { isDefault: true })
-  .option("--format <id>")
-  .option("--account <id>")
-  .option("--brand <id>")
+projectAlias(
+  rulesCmd
+    .command("list", { isDefault: true })
+    .option("--format <id>")
+    .option("--account <id>")
+    .option("--brand <id>")
+)
   .option("--all", "auch ersetzte")
   .action(
     run(
@@ -564,30 +478,23 @@ rulesCmd
         account?: string
         brand?: string
         all?: boolean
-      }) => {
-        const scope = o.format
-          ? ["format", o.format]
-          : o.account
-            ? ["account", o.account]
-            : o.brand
-              ? ["brand", o.brand]
-              : [undefined, undefined]
-        return cat.listRules(ctx(), {
-          scopeType: scope[0],
-          scopeId: scope[1],
-          status: o.all ? undefined : "active",
+      }) =>
+        api.get("/rules", {
+          format: o.format,
+          account: o.account,
+          brand: o.brand,
+          all: o.all,
         })
-      }
     )
   )
-rulesCmd
-  .command("add")
-  .option("--format <id>")
-  .option("--account <id>")
-  .option("--brand <id>")
-  .addOption(
-    new Option("--kind <kind>").choices([...cat.RULE_KINDS]).default("other")
-  )
+projectAlias(
+  rulesCmd
+    .command("add")
+    .option("--format <id>")
+    .option("--account <id>")
+    .option("--brand <id>")
+)
+  .addOption(new Option("--kind <kind>").choices(RULE_KINDS).default("other"))
   .requiredOption("--text <text>")
   .requiredOption("--source <text>", "Quelle (wer, wo, wann)")
   .option("--date <YYYY-MM-DD>")
@@ -610,24 +517,19 @@ rulesCmd
               ? ["brand", o.brand]
               : null
         if (!scope)
-          throw new VSError(
+          throw new CliError(
             "INVALID",
             "Geltungsbereich fehlt: --format, --account oder --brand"
           )
-        return cat.addRule(
-          ctx(),
-          {
-            scopeType: scope[0],
-            scopeId: scope[1],
-            kind: o.kind,
-            text: o.text,
-            source: o.source,
-            date: o.date,
-          },
-          g().actor
-        )
-      },
-      { write: true }
+        return api.post("/rules", {
+          scopeType: scope[0],
+          scopeId: scope[1],
+          kind: o.kind,
+          text: o.text,
+          source: o.source,
+          date: o.date,
+        })
+      }
     )
   )
 rulesCmd
@@ -636,19 +538,17 @@ rulesCmd
   .requiredOption("--source <text>")
   .option("--kind <kind>")
   .action(
-    run(
-      (id: string, o: { text: string; source: string; kind?: string }) =>
-        cat.replaceRule(ctx(), int(id), o, g().actor),
-      { write: true }
+    run((id: string, o: { text: string; source: string; kind?: string }) =>
+      api.post(`/rules/${int(id)}/replace`, {
+        text: o.text,
+        source: o.source,
+        kind: o.kind,
+      })
     )
   )
 rulesCmd
   .command("retire <id>")
-  .action(
-    run((id: string) => cat.retireRule(ctx(), int(id), g().actor), {
-      write: true,
-    })
-  )
+  .action(run((id: string) => api.post(`/rules/${int(id)}/retire`)))
 
 const ieCmd = program
   .command("image-errors")
@@ -659,10 +559,7 @@ ieCmd
   .option("--all", "auch erledigte")
   .action(
     run((o: { format?: string; all?: boolean }) =>
-      cat.listImageErrors(ctx(), {
-        formatId: o.format,
-        status: o.all ? undefined : "active",
-      })
+      api.get("/image-errors", { format: o.format, all: o.all })
     )
   )
 ieCmd
@@ -683,19 +580,14 @@ ieCmd
         example?: string
         source: string
       }) =>
-        cat.addImageError(
-          ctx(),
-          {
-            title: o.title,
-            countermeasure: o.fix,
-            detection: o.detect,
-            formatIds: list(o.formats),
-            exampleImage: o.example,
-            source: o.source,
-          },
-          g().actor
-        ),
-      { write: true }
+        api.post("/image-errors", {
+          title: o.title,
+          countermeasure: o.fix,
+          detection: o.detect,
+          formatIds: list(o.formats),
+          exampleImage: o.example,
+          source: o.source,
+        })
     )
   )
 ieCmd
@@ -717,29 +609,25 @@ ieCmd
           status?: string
         }
       ) =>
-        cat.updateImageError(
-          ctx(),
-          int(id),
-          {
-            title: o.title,
-            countermeasure: o.fix,
-            detection: nullable(o.detect),
-            formatIds: list(o.formats),
-            status: o.status,
-          },
-          g().actor
-        ),
-      { write: true }
+        api.patch(`/image-errors/${int(id)}`, {
+          title: o.title,
+          countermeasure: o.fix,
+          detection: nullable(o.detect),
+          formatIds: list(o.formats),
+          status: o.status,
+        })
     )
   )
 
 // ---------- plan ----------
 
 const planCmd = program.command("plan").description("Content-Plan")
-planCmd
-  .command("list", { isDefault: true })
-  .option("--account <id>")
-  .option("--brand <id>")
+projectAlias(
+  planCmd
+    .command("list", { isDefault: true })
+    .option("--account <id>")
+    .option("--brand <id>")
+)
   .option("--from <date>")
   .option("--to <date>")
   .option("--status <status>")
@@ -754,9 +642,9 @@ planCmd
         status?: string
         ideas?: boolean
       }) =>
-        plan.listPlan(ctx(), {
-          accountId: o.account,
-          brandId: o.brand,
+        api.get("/plan", {
+          account: o.account,
+          brand: o.brand,
           from: o.from,
           to: o.to,
           status: o.status,
@@ -766,7 +654,7 @@ planCmd
   )
 planCmd
   .command("show <id>")
-  .action(run((id: string) => plan.getEntry(ctx(), int(id))))
+  .action(run((id: string) => api.get(`/plan/${int(id)}`)))
 planCmd
   .command("next")
   .description("Eintrag des Tages")
@@ -774,7 +662,7 @@ planCmd
   .option("--date <date>")
   .action(
     run((o: { account: string; date?: string }) =>
-      plan.nextEntry(ctx(), o.account, o.date)
+      api.get("/plan/next", { account: o.account, date: o.date })
     )
   )
 function entryOptions(cmd: Command) {
@@ -789,7 +677,7 @@ function entryOptions(cmd: Command) {
     .option("--hook-direction <text>")
     .option("--hook <text>")
     .option("--rationale <text>", "Begründung")
-    .addOption(new Option("--status <status>").choices([...plan.PLAN_STATUS]))
+    .addOption(new Option("--status <status>").choices(PLAN_STATUS))
     .option("--inspiration <id>", "Inspiration", int)
     .option("--hook-id <id>", "Gewinner-Hook", int)
     .option("--comment <text>")
@@ -823,64 +711,46 @@ const entryPatch = (o: EntryOpts) => ({
 entryOptions(planCmd.command("add").requiredOption("--account <id>"))
   .option("--lock", "gleich sperren")
   .action(
-    run(
-      (o: EntryOpts & { account: string; lock?: boolean }) =>
-        plan.addEntry(
-          ctx(),
-          {
-            accountId: o.account,
-            ...entryPatch(o),
-            topic: o.topic ?? "",
-            locked: o.lock,
-          } as plan.EntryInput,
-          g().actor
-        ),
-      { write: true }
+    run((o: EntryOpts & { account: string; lock?: boolean }) =>
+      api.post("/plan", {
+        accountId: o.account,
+        ...entryPatch(o),
+        topic: o.topic ?? "",
+        locked: o.lock,
+      })
     )
   )
 entryOptions(planCmd.command("update <id>")).action(
-  run(
-    (id: string, o: EntryOpts) =>
-      plan.updateEntry(ctx(), int(id), entryPatch(o), g().actor),
-    { write: true }
+  run((id: string, o: EntryOpts) =>
+    api.patch(`/plan/${int(id)}`, entryPatch(o))
   )
 )
 planCmd
   .command("move <id> <date>")
   .action(
-    run(
-      (id: string, date: string) =>
-        plan.moveEntry(ctx(), int(id), date, g().actor),
-      { write: true }
+    run((id: string, date: string) =>
+      api.post(`/plan/${int(id)}/move`, { date })
     )
   )
 planCmd
   .command("lock <id>")
   .option("--unlock", "entsperren (nur Max)")
   .action(
-    run(
-      (id: string, o: { unlock?: boolean }) =>
-        plan.lockEntry(ctx(), int(id), !o.unlock, g().actor),
-      { write: true }
+    run((id: string, o: { unlock?: boolean }) =>
+      api.post(`/plan/${int(id)}/lock`, { locked: !o.unlock })
     )
   )
 planCmd
   .command("skip <id>")
   .option("--reason <text>")
   .action(
-    run(
-      (id: string, o: { reason?: string }) =>
-        plan.skipEntry(ctx(), int(id), o.reason, g().actor),
-      { write: true }
+    run((id: string, o: { reason?: string }) =>
+      api.post(`/plan/${int(id)}/skip`, { reason: o.reason })
     )
   )
 planCmd
   .command("delete <id>")
-  .action(
-    run((id: string) => plan.deleteEntry(ctx(), int(id), g().actor), {
-      write: true,
-    })
-  )
+  .action(run((id: string) => api.del(`/plan/${int(id)}`)))
 planCmd
   .command("fill")
   .description(
@@ -896,22 +766,16 @@ planCmd
   .action(
     run(
       (o: { account: string; weeks: number; from?: string; file?: string }) => {
-        const entries = o.file
-          ? (readJsonInput(o.file) as Omit<
-              plan.EntryInput,
-              "accountId" | "date"
-            >[])
-          : undefined
+        const entries = o.file ? readJsonInput(o.file) : undefined
         if (entries && !Array.isArray(entries))
-          throw new VSError("INVALID", "--file muss eine JSON-Liste sein")
-        return plan.fillPlan(
-          ctx(),
-          o.account,
-          { weeks: o.weeks, from: o.from, entries },
-          g().actor
-        )
-      },
-      { write: true }
+          throw new CliError("INVALID", "--file muss eine JSON-Liste sein")
+        return api.post("/plan/fill", {
+          account: o.account,
+          weeks: o.weeks,
+          from: o.from,
+          entries,
+        })
+      }
     )
   )
 planCmd
@@ -920,7 +784,7 @@ planCmd
   .option("--days <n>", "", int, 21)
   .action(
     run((o: { account: string; days: number }) =>
-      plan.horizon(ctx(), o.account, undefined, o.days)
+      api.get("/plan/horizon", { account: o.account, days: o.days })
     )
   )
 
@@ -933,20 +797,12 @@ postCmd
   .option("--status <status>")
   .action(
     run((o: { account?: string; status?: string }) =>
-      listPosts(ctx(), { accountId: o.account, status: o.status })
+      api.get("/posts", { account: o.account, status: o.status })
     )
   )
-postCmd.command("show <id>").action(
-  run((id: string) => {
-    const c = ctx()
-    const p = getPost(c, id)
-    return {
-      ...p,
-      metrics: postStats(c, p.id),
-      planEntry: p.planEntryId ? plan.getEntry(c, p.planEntryId) : null,
-    }
-  })
-)
+postCmd
+  .command("show <id>")
+  .action(run((id: string) => api.get(`/posts/${seg(id)}`)))
 postCmd
   .command("register")
   .description(
@@ -973,20 +829,15 @@ postCmd
         angle?: string
         notes?: string
       }) =>
-        registerPost(
-          ctx(),
-          {
-            accountId: o.account,
-            dir: o.dir,
-            planEntryId: o.entry,
-            delivered: o.delivered,
-            hook: o.hook,
-            angle: o.angle,
-            notes: o.notes,
-          },
-          g().actor
-        ),
-      { write: true }
+        api.post("/posts/register", {
+          accountId: o.account,
+          dir: o.dir,
+          planEntryId: o.entry,
+          delivered: o.delivered,
+          hook: o.hook,
+          angle: o.angle,
+          notes: o.notes,
+        })
     )
   )
 postCmd
@@ -995,17 +846,12 @@ postCmd
   .option("--url <url>")
   .option("--at <iso>")
   .action(
-    run(
-      (id: string, o: { tiktokId?: string; url?: string; at?: string }) =>
-        markPosted(
-          ctx(),
-          id,
-          { tiktokId: o.tiktokId, url: o.url, postedAt: o.at },
-          g().actor
-        ),
-      {
-        write: true,
-      }
+    run((id: string, o: { tiktokId?: string; url?: string; at?: string }) =>
+      api.post(`/posts/${seg(id)}/posted`, {
+        tiktokId: o.tiktokId,
+        url: o.url,
+        postedAt: o.at,
+      })
     )
   )
 
@@ -1020,29 +866,20 @@ metricsCmd
   .option("--account <id>")
   .option("--force")
   .action(
-    run(async (o: { account?: string; force?: boolean }) => {
-      const r = await pullMetrics(
-        ctx(),
-        { accountId: o.account, force: o.force },
-        g().actor
-      )
-      if (r.errors.length) process.exitCode = 2
-      return r
-    })
+    run(
+      (o: { account?: string; force?: boolean }) =>
+        api.post("/metrics/pull", { account: o.account, force: o.force }, true),
+      { partial: true }
+    )
   )
 metricsCmd
   .command("show")
   .option("--account <id>")
   .option("--post <id>")
   .action(
-    run((o: { account?: string; post?: string }) => {
-      const c = ctx()
-      if (o.post) return postStats(c, getPost(c, o.post).id)
-      if (o.account) return accountStats(c, o.account)
-      return cat
-        .listAccounts(c, { status: "active" })
-        .map((a) => accountStats(c, a.id))
-    })
+    run((o: { account?: string; post?: string }) =>
+      api.get("/metrics", { account: o.account, post: o.post })
+    )
   )
 
 // ---------- learnings, decisions, hooks, inspiration ----------
@@ -1064,16 +901,12 @@ learningCmd
   .option("--all", "auch überholte")
   .action(
     run((o: { account?: string; all?: boolean }) =>
-      know.listLearnings(ctx(), {
-        accountId: o.account,
-        status: o.all ? undefined : "active",
-      })
+      api.get("/learnings", { account: o.account, all: o.all })
     )
   )
-learningCmd
-  .command("add")
-  .option("--account <id>")
-  .option("--brand <id>")
+projectAlias(
+  learningCmd.command("add").option("--account <id>").option("--brand <id>")
+)
   .option("--format <id>")
   .requiredOption("--statement <text>")
   .requiredOption("--evidence <text>", "Beleg: Posts und Zahlen")
@@ -1092,30 +925,19 @@ learningCmd
         date?: string
         source?: string
       }) =>
-        know.addLearning(
-          ctx(),
-          {
-            ...scopeFrom(o),
-            statement: o.statement,
-            evidence: o.evidence,
-            evidencePostIds: list(o.posts)?.map(int),
-            date: o.date,
-            source: o.source,
-          },
-          g().actor
-        ),
-      { write: true }
+        api.post("/learnings", {
+          ...scopeFrom(o),
+          statement: o.statement,
+          evidence: o.evidence,
+          evidencePostIds: list(o.posts)?.map(int),
+          date: o.date,
+          source: o.source,
+        })
     )
   )
 learningCmd
   .command("outdate <id>")
-  .action(
-    run(
-      (id: string) =>
-        know.setLearningStatus(ctx(), int(id), "outdated", g().actor),
-      { write: true }
-    )
-  )
+  .action(run((id: string) => api.post(`/learnings/${int(id)}/outdate`)))
 
 const decisionCmd = program
   .command("decision")
@@ -1126,16 +948,18 @@ decisionCmd
   .option("--account <id>")
   .action(
     run((o: { account?: string }) =>
-      know.listDecisions(ctx(), { accountId: o.account })
+      api.get("/decisions", { account: o.account })
     )
   )
-decisionCmd
-  .command("add")
-  .requiredOption("--title <text>")
-  .requiredOption("--rationale <text>")
-  .option("--pivot", "als Pivot markieren")
-  .option("--account <id>")
-  .option("--brand <id>")
+projectAlias(
+  decisionCmd
+    .command("add")
+    .requiredOption("--title <text>")
+    .requiredOption("--rationale <text>")
+    .option("--pivot", "als Pivot markieren")
+    .option("--account <id>")
+    .option("--brand <id>")
+)
   .option("--format <id>")
   .option("--date <date>")
   .option("--supersedes <id>", "ersetzt Entscheidung", int)
@@ -1153,20 +977,15 @@ decisionCmd
         supersedes?: number
         source?: string
       }) =>
-        know.addDecision(
-          ctx(),
-          {
-            ...scopeFrom(o),
-            title: o.title,
-            rationale: o.rationale,
-            kind: o.pivot ? "pivot" : "decision",
-            date: o.date,
-            supersedesId: o.supersedes,
-            source: o.source,
-          },
-          g().actor
-        ),
-      { write: true }
+        api.post("/decisions", {
+          ...scopeFrom(o),
+          title: o.title,
+          rationale: o.rationale,
+          kind: o.pivot ? "pivot" : "decision",
+          date: o.date,
+          supersedesId: o.supersedes,
+          source: o.source,
+        })
     )
   )
 
@@ -1180,7 +999,7 @@ hookCmd
   .option("--winners")
   .action(
     run((o: { account?: string; winners?: boolean }) =>
-      know.listHooks(ctx(), { accountId: o.account, winners: o.winners })
+      api.get("/hooks", { account: o.account, winners: o.winners })
     )
   )
 hookCmd
@@ -1199,28 +1018,22 @@ hookCmd
         post?: string
         winner?: boolean
       }) =>
-        know.addHook(
-          ctx(),
-          {
-            accountId: o.account,
-            text: o.text,
-            mechanism: o.mechanism,
-            originPostId: o.post ? getPost(ctx(), o.post).id : null,
-            winner: o.winner,
-          },
-          g().actor
-        ),
-      { write: true }
+        // The API resolves post (ID or folder) to originPostId via getPost, as the old CLI did.
+        api.post("/hooks", {
+          accountId: o.account,
+          text: o.text,
+          mechanism: o.mechanism,
+          post: o.post,
+          winner: o.winner,
+        })
     )
   )
 hookCmd
   .command("winner <id>")
   .option("--unset")
   .action(
-    run(
-      (id: string, o: { unset?: boolean }) =>
-        know.setHookWinner(ctx(), int(id), !o.unset, g().actor),
-      { write: true }
+    run((id: string, o: { unset?: boolean }) =>
+      api.post(`/hooks/${int(id)}/winner`, { winner: !o.unset })
     )
   )
 hookCmd
@@ -1229,18 +1042,21 @@ hookCmd
   .requiredOption("--text <text>")
   .option("--mechanism <text>")
   .action(
-    run(
-      (id: string, o: { text: string; mechanism?: string }) =>
-        know.addHookVariant(ctx(), int(id), o.text, g().actor, o.mechanism),
-      { write: true }
+    run((id: string, o: { text: string; mechanism?: string }) =>
+      api.post(`/hooks/${int(id)}/variants`, {
+        text: o.text,
+        mechanism: o.mechanism,
+      })
     )
   )
 
 const inspoCmd = program.command("inspo").description("Inspiration und Trends")
-inspoCmd
-  .command("list", { isDefault: true })
-  .option("--account <id>")
-  .option("--brand <id>")
+projectAlias(
+  inspoCmd
+    .command("list", { isDefault: true })
+    .option("--account <id>")
+    .option("--brand <id>")
+)
   .option("--status <status>")
   .option("--type <type>")
   .action(
@@ -1251,9 +1067,9 @@ inspoCmd
         status?: string
         type?: string
       }) =>
-        know.listInspirations(ctx(), {
-          accountId: o.account,
-          brandId: o.brand,
+        api.get("/inspo", {
+          account: o.account,
+          brand: o.brand,
           status: o.status,
           type: o.type,
         })
@@ -1261,47 +1077,43 @@ inspoCmd
   )
 inspoCmd
   .command("show <id>")
-  .action(run((id: string) => know.getInspiration(ctx(), int(id))))
-inspoCmd
-  .command("add <url>")
-  .addOption(
-    new Option("--type <type>").choices([...know.INSPO_TYPES]).default("format")
-  )
-  .option("--note <text>")
-  .option("--tags <tags>")
-  .option("--account <id>")
-  .option("--brand <id>")
-  .action(
-    run(
-      (
-        url: string,
-        o: {
-          type: string
-          note?: string
-          tags?: string
-          account?: string
-          brand?: string
-        }
-      ) =>
-        know.addInspiration(
-          ctx(),
-          {
-            url,
-            type: o.type,
-            note: o.note,
-            tags: list(o.tags),
-            accountId: o.account,
-            brandId: o.brand,
-          },
-          g().actor
-        ),
-      { write: true }
+  .action(run((id: string) => api.get(`/inspo/${int(id)}`)))
+projectAlias(
+  inspoCmd
+    .command("add <url>")
+    .addOption(
+      new Option("--type <type>").choices(INSPO_TYPES).default("format")
     )
+    .option("--note <text>")
+    .option("--tags <tags>")
+    .option("--account <id>")
+    .option("--brand <id>")
+).action(
+  run(
+    (
+      url: string,
+      o: {
+        type: string
+        note?: string
+        tags?: string
+        account?: string
+        brand?: string
+      }
+    ) =>
+      api.post("/inspo", {
+        url,
+        type: o.type,
+        note: o.note,
+        tags: list(o.tags),
+        accountId: o.account,
+        brandId: o.brand,
+      })
   )
+)
 inspoCmd
   .command("update <id>")
-  .addOption(new Option("--status <status>").choices([...know.INSPO_STATUS]))
-  .addOption(new Option("--type <type>").choices([...know.INSPO_TYPES]))
+  .addOption(new Option("--status <status>").choices(INSPO_STATUS))
+  .addOption(new Option("--type <type>").choices(INSPO_TYPES))
   .option("--note <text>")
   .option("--tags <tags>")
   .option("--account <id>")
@@ -1319,20 +1131,14 @@ inspoCmd
           briefing?: string
         }
       ) =>
-        know.updateInspiration(
-          ctx(),
-          int(id),
-          {
-            status: o.status,
-            type: o.type,
-            note: nullable(o.note),
-            tags: list(o.tags),
-            accountId: o.account,
-            briefingPath: nullable(o.briefing),
-          },
-          g().actor
-        ),
-      { write: true }
+        api.patch(`/inspo/${int(id)}`, {
+          status: o.status,
+          type: o.type,
+          note: nullable(o.note),
+          tags: list(o.tags),
+          accountId: o.account,
+          briefingPath: nullable(o.briefing),
+        })
     )
   )
 
@@ -1345,10 +1151,10 @@ program
   .option("--limit <n>", "", int, 50)
   .action(
     run((o: { entity?: string; id?: string; by?: string; limit: number }) =>
-      know.listHistory(ctx(), {
+      api.get("/history", {
         entity: o.entity,
-        entityId: o.id,
-        actor: o.by,
+        id: o.id,
+        by: o.by,
         limit: o.limit,
       })
     )
@@ -1377,17 +1183,15 @@ program
         zip?: string
       }) => {
         if (o.finalize && !o.zip)
-          throw new VSError("INVALID", "--finalize braucht --zip <name>.zip")
-        return renderPost(
-          ctx(),
-          o.post,
+          throw new CliError("INVALID", "--finalize braucht --zip <name>.zip")
+        return api.post(
+          "/render",
           {
+            post: o.post,
             video: o.video,
-            finalize: o.finalize
-              ? { stem: o.finalize, zip: o.zip! }
-              : undefined,
+            finalize: o.finalize ? { stem: o.finalize, zip: o.zip } : undefined,
           },
-          g().actor
+          true
         )
       }
     )
@@ -1399,65 +1203,12 @@ program
   .action(
     run((kind: string, id: string) => {
       if (!["post", "account", "inspo"].includes(kind))
-        throw new VSError("INVALID", "kind muss post, account oder inspo sein")
-      return openPath(
-        ctx(),
-        folderFor(ctx(), kind as "post" | "account" | "inspo", id)
-      )
+        throw new CliError("INVALID", "kind muss post, account oder inspo sein")
+      return api.post("/open", { kind, id })
     })
   )
 
-program
-  .command("serve")
-  .description("Web-App lokal starten (nur 127.0.0.1)")
-  .option("--port <n>", "", int, 4310)
-  .option("--dev", "Entwicklungsmodus")
-  .action(async (o: { port: number; dev?: boolean }) => {
-    try {
-      const cfg = resolveConfig({ dataDir: g().dataDir })
-      const root = appRoot()
-      if (!o.dev && !fs.existsSync(path.join(root, ".next", "BUILD_ID"))) {
-        throw new VSError(
-          "INVALID",
-          `Kein Build vorhanden. Einmal "npm run build" in ${root} ausführen oder --dev nutzen.`
-        )
-      }
-      const nextBin = path.join(
-        root,
-        "node_modules",
-        "next",
-        "dist",
-        "bin",
-        "next"
-      )
-      const child = spawn(
-        process.execPath,
-        [
-          nextBin,
-          o.dev ? "dev" : "start",
-          "--hostname",
-          "127.0.0.1",
-          "--port",
-          String(o.port),
-        ],
-        {
-          cwd: root,
-          stdio: "inherit",
-          env: {
-            ...process.env,
-            VIBEGROWTH_DATA_DIR: cfg.dataDir,
-            VIBEGROWTH_DB: cfg.dbPath,
-            VIBEGROWTH_APP_ROOT: root,
-          },
-        }
-      )
-      process.stderr.write(
-        `VibeGrowth läuft auf http://127.0.0.1:${o.port} (Daten: ${cfg.dataDir.replace(os.homedir(), "~")})\n`
-      )
-      child.on("exit", (code) => process.exit(code ?? 0))
-    } catch (e) {
-      fail(e)
-    }
-  })
+registerServe(program)
+registerGrowth(program)
 
 program.parseAsync().catch(fail)
