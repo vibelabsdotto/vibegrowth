@@ -6,12 +6,22 @@ import {
   BookOpen,
   CalendarDays,
   Clapperboard,
+  FileText,
+  FlaskConical,
+  FolderKanban,
   GitBranch,
   History,
+  Inbox,
   Layers,
+  LayoutDashboard,
   Lightbulb,
+  ListTodo,
   Quote,
+  Sparkles,
+  Store,
+  TrendingUp,
   Users,
+  type LucideIcon,
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import {
@@ -23,6 +33,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -31,22 +42,39 @@ import {
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
-const plan = [
-  { href: "/", label: "Kalender", icon: CalendarDays },
+type NavItem = {
+  href: string
+  label: string
+  icon: LucideIcon
+  badge?: number
+}
+
+export type SidebarProject = { id: string; name: string }
+
+const shortform: NavItem[] = [
+  { href: "/calendar", label: "Kalender", icon: CalendarDays },
   { href: "/posts", label: "Posts", icon: Clapperboard },
   { href: "/accounts", label: "Accounts", icon: Users },
   { href: "/formats", label: "Formate", icon: Layers },
-]
-
-const trace = [
-  { href: "/learnings", label: "Learnings", icon: BookOpen },
-  { href: "/decisions", label: "Entscheidungen", icon: GitBranch },
   { href: "/hooks", label: "Hooks", icon: Quote },
   { href: "/inspiration", label: "Inspiration", icon: Lightbulb },
+]
+
+const knowledge: NavItem[] = [
+  { href: "/learnings", label: "Learnings", icon: BookOpen },
+  { href: "/decisions", label: "Entscheidungen", icon: GitBranch },
   { href: "/history", label: "Verlauf", icon: History },
 ]
 
-export function AppSidebar() {
+export function AppSidebar({
+  projects = [],
+  pendingApprovals = 0,
+  apiDown = false,
+}: {
+  projects?: SidebarProject[]
+  pendingApprovals?: number
+  apiDown?: boolean
+}) {
   const pathname = usePathname()
   const { state, isMobile, setOpenMobile } = useSidebar()
   const collapsed = !isMobile && state === "collapsed"
@@ -55,7 +83,28 @@ export function AppSidebar() {
       ? pathname === "/"
       : pathname === href || pathname.startsWith(`${href}/`)
 
-  const group = (label: string, items: typeof plan) => (
+  const growth: NavItem[] = [
+    { href: "/", label: "Übersicht", icon: LayoutDashboard },
+    {
+      href: "/approvals",
+      label: "Wartet auf Max",
+      icon: Inbox,
+      badge: pendingApprovals,
+    },
+    { href: "/content", label: "Content", icon: FileText },
+    { href: "/experiments", label: "Experimente & Log", icon: FlaskConical },
+    { href: "/backlog", label: "Backlog", icon: ListTodo },
+    { href: "/geo", label: "GEO", icon: Sparkles },
+    { href: "/store", label: "Store", icon: Store },
+  ]
+
+  const projectItems: NavItem[] = projects.map((p) => ({
+    href: `/projects/${encodeURIComponent(p.id)}`,
+    label: p.name,
+    icon: FolderKanban,
+  }))
+
+  const group = (label: string, items: NavItem[], empty?: string) => (
     <SidebarGroup>
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarGroupContent>
@@ -64,7 +113,9 @@ export function AppSidebar() {
             <SidebarMenuItem key={item.href}>
               <SidebarMenuButton
                 isActive={active(item.href)}
-                tooltip={item.label}
+                tooltip={
+                  item.badge ? `${item.label} (${item.badge})` : item.label
+                }
                 render={
                   <Link
                     href={item.href}
@@ -75,10 +126,24 @@ export function AppSidebar() {
                 }
               >
                 <item.icon aria-hidden="true" />
-                <span>{item.label}</span>
+                <span className="truncate">{item.label}</span>
+                {item.badge ? (
+                  <span className="sr-only">, {item.badge} offen</span>
+                ) : null}
               </SidebarMenuButton>
+              {item.badge ? (
+                <SidebarMenuBadge
+                  aria-hidden="true"
+                  className="bg-(--status-warn)/20 text-foreground peer-hover/menu-button:text-foreground peer-data-active/menu-button:text-foreground"
+                >
+                  {item.badge}
+                </SidebarMenuBadge>
+              ) : null}
             </SidebarMenuItem>
           ))}
+          {items.length === 0 && empty && !collapsed ? (
+            <li className="px-2 py-1 text-xs text-muted-foreground">{empty}</li>
+          ) : null}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
@@ -96,7 +161,7 @@ export function AppSidebar() {
           <SidebarMenu className="min-w-0 flex-1">
             <SidebarMenuItem>
               <SidebarMenuButton render={<Link href="/" prefetch={false} />}>
-                <Clapperboard aria-hidden="true" />
+                <TrendingUp aria-hidden="true" />
                 <span className="font-semibold">VibeGrowth</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -106,8 +171,14 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <nav aria-label="Hauptnavigation">
-          {group("Planen", plan)}
-          {group("Nachvollziehen", trace)}
+          {group("Growth", growth)}
+          {group(
+            "Projekte",
+            projectItems,
+            apiDown ? "API nicht erreichbar" : "Keine Projekte"
+          )}
+          {group("Shortform", shortform)}
+          {group("Wissen", knowledge)}
         </nav>
       </SidebarContent>
       <SidebarFooter>

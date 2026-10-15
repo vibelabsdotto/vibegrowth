@@ -41,7 +41,7 @@ next-env.d.ts
 # vibegrowth
 dist/
 apps/*/dist/
-data/
+/data/
 .hermes/
 .agents/
 skills-lock.json

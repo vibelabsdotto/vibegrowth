@@ -1,0 +1,15 @@
+/* Status tokens for the growth views (traffic light, deltas, verdicts).
+   Plain CSS variables; components use them via text-(--status-good) etc. */
+:root {
+  --status-good: oklch(0.56 0.14 152);
+  --status-warn: oklch(0.68 0.15 70);
+  --status-bad: oklch(0.577 0.215 27);
+  --status-info: oklch(0.55 0.15 255);
+}
+
+.dark {
+  --status-good: oklch(0.74 0.15 155);
+  --status-warn: oklch(0.8 0.15 80);
+  --status-bad: oklch(0.7 0.18 25);
+  --status-info: oklch(0.72 0.13 250);
+}
