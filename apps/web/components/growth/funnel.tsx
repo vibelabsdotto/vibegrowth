@@ -12,9 +12,12 @@ export function FunnelStrip({
   stages,
   weakest,
   prevLabel = "Vorwoche",
+  windowTo,
 }: {
   stages: FunnelStage[]
   weakest: string | null
+  /** Window end; a stage with an earlier asOf shows its own end date (lagging source). */
+  windowTo?: string
   /** "Vorwoche" for 7-day windows, "davor" otherwise */
   prevLabel?: string
 }) {
@@ -52,6 +55,9 @@ export function FunnelStrip({
                 </div>
                 <p className="text-xs text-muted-foreground tabular-nums">
                   {prevLabel} {fmtNum(s.prev)}
+                  {s.asOf && windowTo && s.asOf < windowTo
+                    ? ` · Stand ${s.asOf.slice(8, 10)}.${s.asOf.slice(5, 7)}.`
+                    : null}
                 </p>
                 {prevStage ? (
                   <div className="mt-auto flex flex-col gap-1 border-t pt-2">

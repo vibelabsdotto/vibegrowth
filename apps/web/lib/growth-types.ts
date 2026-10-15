@@ -93,6 +93,8 @@ export type FunnelStage = {
   conversion?: number | null
   prevConversion?: number | null
   hasData?: boolean
+  /** Last day of the stage window when its sources lag behind window.to */
+  asOf?: string
 }
 
 export type Funnel = {

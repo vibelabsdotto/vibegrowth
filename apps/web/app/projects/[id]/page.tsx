@@ -193,6 +193,7 @@ export default async function ProjectPage({
             stages={funnel!.stages}
             weakest={funnel!.weakest}
             prevLabel={days === 7 ? "Vorwoche" : "davor"}
+            windowTo={funnel!.window.to}
           />
         )}
       </section>

@@ -73,6 +73,8 @@ export interface FunnelStage {
   conversion: number | null
   prevConversion: number | null
   hasData: boolean
+  /** Last day of this stage's window. Earlier than window.to when its sources lag (e.g. Play exports ~3 days). */
+  asOf: string
 }
 
 export interface Funnel {
@@ -174,6 +176,25 @@ export class FunnelService {
     return hasData ? total : null
   }
 
+  /** Latest day with a total (dims '') for any of the stage's sources, not after `end`. */
+  private latest(
+    projectId: string,
+    stage: FunnelStageDef,
+    end: string
+  ): string | null {
+    let max: string | null = null
+    const q = this.database.ctx.sqlite.prepare(
+      "SELECT max(date) AS d FROM kpi_daily WHERE project_id = ? AND source = ? AND metric = ? AND dims = '' AND date <= ?"
+    )
+    for (const spec of stage.sources) {
+      const [source, metric] = splitSource(spec)
+      const d = (q.get(projectId, source, metric, end) as { d: string | null })
+        .d
+      if (d && (!max || d > max)) max = d
+    }
+    return max
+  }
+
   /**
    * Funnel for `days` days ending at `end` (default yesterday) against the window before.
    * Signature is stable: growth-work (overview, context) calls funnel(projectId, days, end).
@@ -187,8 +208,17 @@ export class FunnelService {
     const defs = funnelStages(jsonObject(project.config))
     const stages: FunnelStage[] = []
     for (const [i, def] of defs.entries()) {
-      const value = this.aggregate(projectId, def, window)
-      const prev = this.aggregate(projectId, def, prevWindow)
+      // A lagging source would otherwise look like a drop: compare equal windows ending at its last day.
+      const last = this.latest(projectId, def, window.to)
+      const asOf =
+        last && last < window.to && last >= window.from ? last : window.to
+      const w = asOf === window.to ? window : windowEnding(asOf, days)
+      const pw =
+        asOf === window.to
+          ? prevWindow
+          : windowEnding(addDays(w.from, -1), days)
+      const value = this.aggregate(projectId, def, w)
+      const prev = this.aggregate(projectId, def, pw)
       const before = i > 0 ? stages[i - 1] : null
       const ratio = (a: number | null, b: number | null | undefined) =>
         a !== null && b !== null && b !== undefined && b !== 0
@@ -206,6 +236,7 @@ export class FunnelService {
         conversion: before ? ratio(value, before.value) : null,
         prevConversion: before ? ratio(prev, before.prev) : null,
         hasData: value !== null,
+        asOf,
       })
     }
     let weakest: string | null = null
