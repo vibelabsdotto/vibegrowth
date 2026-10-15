@@ -8,6 +8,7 @@ import * as cat from "../core/catalog"
 import {
   configFilePath,
   ConfigError,
+  env,
   resolveConfig,
   writeConfigFile,
 } from "../core/config"
@@ -28,21 +29,26 @@ import {
 import { VSError } from "../core/util"
 import { printHuman } from "./print"
 
+/** "vibegrowth", or "vibeshorts" when called through the old name (kept as alias). */
+function cliName() {
+  return env("CLI_NAME") ?? "vibegrowth"
+}
+
 const program = new Command()
 program
-  .name("vibeshorts")
+  .name(cliName())
   .description(
-    "Lokales Content-Studio für Shortform. Jede Ausgabe mit --json maschinenlesbar."
+    "VibeGrowth: Shortform und Website-/App-Growth für alle Projekte, lokal. Jede Ausgabe mit --json maschinenlesbar."
   )
   .option("--json", "JSON ausgeben")
   .option(
     "--actor <name>",
     "wer schreibt (max, echo, cron:jule …)",
-    process.env.VIBESHORTS_ACTOR ?? "agent"
+    env("ACTOR") ?? "agent"
   )
   .option(
     "--data-dir <path>",
-    "Datenordner (sonst VIBESHORTS_DATA_DIR oder Config)"
+    "Datenordner (sonst VIBEGROWTH_DATA_DIR oder Config)"
   )
   .showHelpAfterError()
 
@@ -132,12 +138,12 @@ function readJsonInput(file?: string): unknown {
 program
   .command("init")
   .description(
-    "Datenordner und Werkzeuge in ~/.config/vibeshorts/config.json eintragen und die Datenbank anlegen"
+    "Datenordner und Werkzeuge in ~/.config/vibegrowth/config.json eintragen und die Datenbank anlegen"
   )
   .option("--data-dir <path>", "Content-Ordner (Pflicht)")
   .option(
     "--db <path>",
-    "SQLite-Datei (Standard <data-dir>/.vibeshorts/vibeshorts.db)"
+    "SQLite-Datei (Standard <data-dir>/.vibegrowth/vibegrowth.db, bestehende .vibeshorts/vibeshorts.db wird weiter genutzt)"
   )
   .option("--python <path>", "Python mit Pillow für Renderer und Zahlen-Abruf")
   .option(
@@ -1439,14 +1445,14 @@ program
           stdio: "inherit",
           env: {
             ...process.env,
-            VIBESHORTS_DATA_DIR: cfg.dataDir,
-            VIBESHORTS_DB: cfg.dbPath,
-            VIBESHORTS_APP_ROOT: root,
+            VIBEGROWTH_DATA_DIR: cfg.dataDir,
+            VIBEGROWTH_DB: cfg.dbPath,
+            VIBEGROWTH_APP_ROOT: root,
           },
         }
       )
       process.stderr.write(
-        `VibeShorts läuft auf http://127.0.0.1:${o.port} (Daten: ${cfg.dataDir.replace(os.homedir(), "~")})\n`
+        `VibeGrowth läuft auf http://127.0.0.1:${o.port} (Daten: ${cfg.dataDir.replace(os.homedir(), "~")})\n`
       )
       child.on("exit", (code) => process.exit(code ?? 0))
     } catch (e) {

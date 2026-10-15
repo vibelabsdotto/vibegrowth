@@ -82,7 +82,7 @@ export default async function PostsPage({
           <EmptyHeader>
             <EmptyTitle>Keine Posts</EmptyTitle>
             <EmptyDescription>
-              Posts entstehen per „vibeshorts post register“ oder über den
+              Posts entstehen per „vibegrowth post register“ oder über den
               Import.
             </EmptyDescription>
           </EmptyHeader>

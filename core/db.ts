@@ -3,7 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import Database from "better-sqlite3"
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
-import { resolveConfig, type VibeShortsConfig } from "./config"
+import { env, resolveConfig, type VibeGrowthConfig } from "./config"
 import * as schema from "./schema"
 
 export type DB = BetterSQLite3Database<typeof schema>
@@ -11,12 +11,12 @@ export type DB = BetterSQLite3Database<typeof schema>
 export interface Ctx {
   db: DB
   sqlite: Database.Database
-  config: VibeShortsConfig
+  config: VibeGrowthConfig
 }
 
 /** Repo root (contains drizzle/ and renderer/). */
 export function appRoot(): string {
-  const starts = [process.env.VIBESHORTS_APP_ROOT, process.cwd()]
+  const starts = [env("APP_ROOT"), process.cwd()]
   try {
     starts.push(path.dirname(fileURLToPath(import.meta.url)))
   } catch {
@@ -35,7 +35,7 @@ export function appRoot(): string {
     }
   }
   throw new Error(
-    "VibeShorts-Repo (drizzle/) nicht gefunden. VIBESHORTS_APP_ROOT auf das Repo setzen."
+    "VibeGrowth-Repo (drizzle/) nicht gefunden. VIBEGROWTH_APP_ROOT auf das Repo setzen."
   )
 }
 
@@ -75,7 +75,7 @@ function migrate(sqlite: Database.Database) {
   run.immediate()
 }
 
-export function openDb(config: VibeShortsConfig = resolveConfig()): Ctx {
+export function openDb(config: VibeGrowthConfig = resolveConfig()): Ctx {
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true })
   const sqlite = new Database(config.dbPath)
   sqlite.pragma("busy_timeout = 15000")
@@ -86,12 +86,12 @@ export function openDb(config: VibeShortsConfig = resolveConfig()): Ctx {
   return { db: drizzle(sqlite, { schema }), sqlite, config }
 }
 
-const g = globalThis as unknown as { __vibeshorts?: Ctx }
+const g = globalThis as unknown as { __vibegrowth?: Ctx }
 
 /** Process-wide context (web server). The CLI opens its own per run. */
 export function getCtx(): Ctx {
-  if (!g.__vibeshorts) g.__vibeshorts = openDb()
-  return g.__vibeshorts
+  if (!g.__vibegrowth) g.__vibegrowth = openDb()
+  return g.__vibegrowth
 }
 
 /** Run fn in a BEGIN IMMEDIATE transaction: writers queue on busy_timeout instead of failing mid-way. */

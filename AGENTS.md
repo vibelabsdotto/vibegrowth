@@ -8,16 +8,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-# VibeShorts
+# VibeGrowth
 
-Lokales Content-Studio für Shortform. Web-App (Next.js, nur Loopback) und CLI teilen dieselbe Logik in `core/` und dieselbe SQLite-Datenbank. Agents arbeiten nur über die CLI mit `--json`.
+Lokales Growth-Studio für alle VibeLabs-Projekte (früher VibeShorts): Shortform-Modul und Growth-Modul für Websites und Apps. Web-App (Next.js, nur Loopback) und CLI teilen dieselbe Logik in `core/` und dieselbe SQLite-Datenbank. Agents arbeiten nur über die CLI mit `--json`.
 
 ## Aufbau
 
 | Ort | Zweck |
 |---|---|
 | `core/` | Schema (Drizzle), DB-Öffnen mit WAL und Migration, gesamte Fachlogik |
-| `cli/` | Commander-CLI, gebündelt nach `dist/cli.mjs` (`npm run build:cli`), Einstieg `bin/vibeshorts.mjs` |
+| `cli/` | Commander-CLI, gebündelt nach `dist/cli.mjs` (`npm run build:cli`), Einstieg `bin/vibegrowth.mjs`, Alias `bin/vibeshorts.mjs` |
 | `app/` | Seiten (Server Components lesen direkt aus `core/`), `actions.ts` für alle Schreibvorgänge aus dem Browser, `media/` liefert Bilder und Videos aus dem Datenordner |
 | `components/` | Eigene Komponenten; `components/ui/` sind shadcn-Komponenten (base-nova, Base UI) |
 | `renderer/` | Python-Renderer, Zahlen-Abruf, gebündelte OFL-Fonts |

@@ -334,7 +334,7 @@ export async function pullAccount(
   if (!tiktokPullScript || !fs.existsSync(tiktokPullScript)) {
     throw new VSError(
       "EXTERNAL",
-      "tiktok_pull.py nicht konfiguriert. Einmalig: vibeshorts init --tiktok-pull <pfad> (liefert Session und Cookies)."
+      "tiktok_pull.py nicht konfiguriert. Einmalig: vibegrowth init --tiktok-pull <pfad> (liefert Session und Cookies)."
     )
   }
   const owner = `${process.pid}-${Math.random().toString(36).slice(2)}`

@@ -2,22 +2,25 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-export interface VibeShortsConfig {
+export interface VibeGrowthConfig {
   /** Content folder with <brand>/<account>/posts/... */
   dataDir: string
   /** SQLite file */
   dbPath: string
 }
 
-const CONFIG_FILE = path.join(
-  os.homedir(),
-  ".config",
-  "vibeshorts",
-  "config.json"
-)
+const CONFIG_DIR = path.join(os.homedir(), ".config")
+const CONFIG_FILE = path.join(CONFIG_DIR, "vibegrowth", "config.json")
+/** Read as fallback; VibeGrowth was called VibeShorts before. */
+const LEGACY_CONFIG_FILE = path.join(CONFIG_DIR, "vibeshorts", "config.json")
 
 export function configFilePath() {
   return CONFIG_FILE
+}
+
+/** VIBEGROWTH_<name>, falling back to the old VIBESHORTS_<name>. */
+export function env(name: string): string | undefined {
+  return process.env[`VIBEGROWTH_${name}`] ?? process.env[`VIBESHORTS_${name}`]
 }
 
 function expand(p: string) {
@@ -33,17 +36,24 @@ interface ConfigFile {
   python?: string
   /** tiktok_pull.py module that provides the TikTok session and cookie jar */
   tiktokPullScript?: string
+  /** Folder with collector credentials (OAuth tokens, API keys). Only referenced, never copied. */
+  secretsDir?: string
 }
 
-function readConfigFile(): ConfigFile {
+function readJson(file: string): ConfigFile {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"))
+    return JSON.parse(fs.readFileSync(file, "utf8"))
   } catch {
     return {}
   }
 }
 
-/** Merge the given keys into ~/.config/vibeshorts/config.json. */
+/** The new file wins key by key over the legacy one. */
+function readConfigFile(): ConfigFile {
+  return { ...readJson(LEGACY_CONFIG_FILE), ...readJson(CONFIG_FILE) }
+}
+
+/** Merge the given keys into ~/.config/vibegrowth/config.json. */
 export function writeConfigFile(cfg: ConfigFile) {
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true })
   const value: ConfigFile = { ...readConfigFile() }
@@ -60,41 +70,46 @@ export function writeConfigFile(cfg: ConfigFile) {
 export function toolConfig() {
   const file = readConfigFile()
   const python =
-    process.env.VIBESHORTS_PYTHON ??
+    env("PYTHON") ??
     file.python ??
     (fs.existsSync("/opt/homebrew/bin/python3")
       ? "/opt/homebrew/bin/python3"
       : "python3")
+  const secrets = env("SECRETS_DIR") ?? file.secretsDir
   return {
     python,
-    tiktokPullScript:
-      process.env.VIBESHORTS_TIKTOK_PULL ?? file.tiktokPullScript ?? null,
+    tiktokPullScript: env("TIKTOK_PULL") ?? file.tiktokPullScript ?? null,
+    secretsDir: secrets ? expand(secrets) : null,
   }
 }
 
 export class ConfigError extends Error {}
 
 /**
- * Resolution order: explicit override > VIBESHORTS_DATA_DIR / VIBESHORTS_DB > ~/.config/vibeshorts/config.json.
- * The database defaults to <dataDir>/.vibeshorts/vibeshorts.db so it lives with the content, not the code.
+ * Resolution order: explicit override > VIBEGROWTH_DATA_DIR / VIBEGROWTH_DB (or the old VIBESHORTS_*)
+ * > ~/.config/vibegrowth/config.json > ~/.config/vibeshorts/config.json.
+ * The database lives with the content, not the code: <dataDir>/.vibegrowth/vibegrowth.db,
+ * or the existing <dataDir>/.vibeshorts/vibeshorts.db from before the rename.
  */
 export function resolveConfig(
-  override: Partial<VibeShortsConfig> = {}
-): VibeShortsConfig {
+  override: Partial<VibeGrowthConfig> = {}
+): VibeGrowthConfig {
   const file = readConfigFile()
-  const dataDirRaw =
-    override.dataDir ?? process.env.VIBESHORTS_DATA_DIR ?? file.dataDir
+  const dataDirRaw = override.dataDir ?? env("DATA_DIR") ?? file.dataDir
   if (!dataDirRaw) {
     throw new ConfigError(
-      `Kein Datenordner gesetzt. Einmalig "vibeshorts init --data-dir <pfad>" ausführen oder VIBESHORTS_DATA_DIR setzen.`
+      `Kein Datenordner gesetzt. Einmalig "vibegrowth init --data-dir <pfad>" ausführen oder VIBEGROWTH_DATA_DIR setzen.`
     )
   }
   const dataDir = expand(dataDirRaw)
-  const dbRaw = override.dbPath ?? process.env.VIBESHORTS_DB ?? file.dbPath
-  const dbPath = dbRaw
-    ? expand(dbRaw)
-    : path.join(dataDir, ".vibeshorts", "vibeshorts.db")
-  return { dataDir, dbPath }
+  const dbRaw = override.dbPath ?? env("DB") ?? file.dbPath
+  return { dataDir, dbPath: dbRaw ? expand(dbRaw) : defaultDbPath(dataDir) }
+}
+
+function defaultDbPath(dataDir: string) {
+  const legacy = path.join(dataDir, ".vibeshorts", "vibeshorts.db")
+  if (fs.existsSync(legacy)) return legacy
+  return path.join(dataDir, ".vibegrowth", "vibegrowth.db")
 }
 
 /** Resolve a stored relative path against the data dir and refuse anything outside it. */

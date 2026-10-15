@@ -58,7 +58,7 @@ export function RulesCard({
                 Regel hinzufügen
               </Button>
             )}
-            initial={{ kind: "hook", text: "", source: "Max in VibeShorts" }}
+            initial={{ kind: "hook", text: "", source: "Max in VibeGrowth" }}
             fields={[
               { name: "kind", label: "Typ", type: "select", options: kinds },
               {
@@ -143,7 +143,7 @@ export function RulesCard({
         initial={{
           kind: replacing?.kind ?? "other",
           text: replacing?.text ?? "",
-          source: "Max in VibeShorts",
+          source: "Max in VibeGrowth",
         }}
         fields={[
           { name: "kind", label: "Typ", type: "select", options: kinds },

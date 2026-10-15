@@ -1,6 +1,6 @@
-# VibeShorts
+# VibeGrowth
 
-A local content studio for short-form video and photo-mode slideshows. One SQLite database holds accounts, AI characters, formats with versions, rules, known image errors, a multi-week content calendar, posts with their folders and TikTok numbers, learnings, decisions, hooks and saved inspiration. A Next.js web app on `127.0.0.1` shows it all; a CLI with `--json` on every command lets AI agents plan, produce and report through the same data.
+VibeGrowth (formerly VibeShorts) is a local growth studio. The shortform module is a content studio for short-form video and photo-mode slideshows. One SQLite database holds accounts, AI characters, formats with versions, rules, known image errors, a multi-week content calendar, posts with their folders and TikTok numbers, learnings, decisions, hooks and saved inspiration. A Next.js web app on `127.0.0.1` shows it all; a CLI with `--json` on every command lets AI agents plan, produce and report through the same data.
 
 Built for a setup where agents produce one post per account every morning and a human wants to see the next weeks, step in anywhere and understand why something changed.
 
@@ -25,17 +25,17 @@ Not included on purpose: uploading or posting, scheduling, login, cloud hosting,
 ## Setup
 
 ```bash
-git clone https://github.com/vibelabsdotto/vibeshorts.git
-cd vibeshorts
+git clone https://github.com/vibelabsdotto/vibegrowth.git
+cd vibegrowth
 npm install
 npm run build
-npm link            # optional: puts `vibeshorts` on your PATH
+npm link            # optional: puts `vibegrowth` (and the old name `vibeshorts`) on your PATH
 
-vibeshorts init --data-dir ~/path/to/content
-vibeshorts serve    # http://127.0.0.1:4310
+vibegrowth init --data-dir ~/path/to/content
+vibegrowth serve    # http://127.0.0.1:4310
 ```
 
-`init` writes `~/.config/vibeshorts/config.json`. The database defaults to `<data-dir>/.vibeshorts/vibeshorts.db` so it lives next to the content, not the code. Override per process with `VIBESHORTS_DATA_DIR`, `VIBESHORTS_DB`, `VIBESHORTS_PYTHON` and `VIBESHORTS_TIKTOK_PULL`.
+`init` writes `~/.config/vibegrowth/config.json`. The database defaults to `<data-dir>/.vibegrowth/vibegrowth.db` so it lives next to the content, not the code; an existing `<data-dir>/.vibeshorts/vibeshorts.db` keeps being used. Override per process with `VIBEGROWTH_DATA_DIR`, `VIBEGROWTH_DB`, `VIBEGROWTH_PYTHON` and `VIBEGROWTH_TIKTOK_PULL`. The old names (`~/.config/vibeshorts/config.json`, `VIBESHORTS_*`) are still read as a fallback; the new ones win.
 
 ### Content folder layout
 
@@ -51,14 +51,14 @@ vibeshorts serve    # http://127.0.0.1:4310
 │       │   └── render/       # slides, MP4, contact sheet
 │       ├── analysis/<handle>_<id>/briefing.md
 │       └── pulls/
-└── .vibeshorts/vibeshorts.db
+└── .vibegrowth/vibegrowth.db
 ```
 
-`vibeshorts import` reads an existing folder in this layout (plus optional `journal.md`, `angles.md`, `performance.jsonl` and `.autopilot/matches.json` files from an earlier Markdown-based workflow). It is idempotent: running it again creates nothing new and never overwrites edits made in the tool.
+`vibegrowth import` reads an existing folder in this layout (plus optional `journal.md`, `angles.md`, `performance.jsonl` and `.autopilot/matches.json` files from an earlier Markdown-based workflow). It is idempotent: running it again creates nothing new and never overwrites edits made in the tool.
 
 ## CLI
 
-Every command accepts `--json` and `--actor <name>` (default `agent`, or `VIBESHORTS_ACTOR`). Writes from the actor `max` count as the human: only that actor may change locked entries or entries the human created. The web app writes as `max`.
+Every command accepts `--json` and `--actor <name>` (default `agent`, or `VIBEGROWTH_ACTOR`). Writes from the actor `max` count as the human: only that actor may change locked entries or entries the human created. The web app writes as `max`.
 
 | Command | Purpose |
 |---|---|
@@ -81,18 +81,20 @@ Every command accepts `--json` and `--actor <name>` (default `agent`, or `VIBESH
 | `import` | Idempotent import of an existing content folder |
 | `serve [--port]` | Start the web app on 127.0.0.1 |
 
+`vibeshorts` is kept as an alias of `vibegrowth` with the same commands, JSON output and exit codes.
+
 Exit codes: `0` ok, `1` error, `2` partial failure (`metrics pull`), `3` refused because an entry is locked or owned by the human. Errors with `--json` come back as `{"error": {"code", "message"}}`.
 
 A typical morning run:
 
 ```bash
-vibeshorts metrics pull --actor cron:jule
-vibeshorts context --account jule --json --actor cron:jule
+vibegrowth metrics pull --actor cron:jule
+vibegrowth context --account jule --json --actor cron:jule
 # … produce the post into <account>/posts/<date>-<slug>/ …
-vibeshorts render --post <date>-<slug> --actor cron:jule
-vibeshorts post register --account jule --dir <date>-<slug> --delivered --actor cron:jule
-vibeshorts learning add --account jule --statement "…" --evidence "…" --actor cron:jule
-vibeshorts plan fill --account jule --weeks 3 --file next-entries.json --actor cron:jule
+vibegrowth render --post <date>-<slug> --actor cron:jule
+vibegrowth post register --account jule --dir <date>-<slug> --delivered --actor cron:jule
+vibegrowth learning add --account jule --statement "…" --evidence "…" --actor cron:jule
+vibegrowth plan fill --account jule --weeks 3 --file next-entries.json --actor cron:jule
 ```
 
 ## How it works

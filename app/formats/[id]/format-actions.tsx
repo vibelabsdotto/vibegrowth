@@ -154,7 +154,7 @@ export function ImageErrorsCard({
                 Bildfehler hinzufügen
               </Button>
             )}
-            initial={{ formatIds: formatId, source: "Max in VibeShorts" }}
+            initial={{ formatIds: formatId, source: "Max in VibeGrowth" }}
             fields={[
               {
                 name: "title",

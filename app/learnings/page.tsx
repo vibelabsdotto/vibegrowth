@@ -83,7 +83,7 @@ export default async function LearningsPage({
           <EmptyHeader>
             <EmptyTitle>Keine Learnings</EmptyTitle>
             <EmptyDescription>
-              Agents tragen sie per „vibeshorts learning add“ mit Beleg ein.
+              Agents tragen sie per „vibegrowth learning add“ mit Beleg ein.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

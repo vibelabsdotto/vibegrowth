@@ -47,7 +47,7 @@ export default function DecisionsPage() {
           <EmptyHeader>
             <EmptyTitle>Noch keine Entscheidungen</EmptyTitle>
             <EmptyDescription>
-              Pivots kommen per „vibeshorts decision add --pivot“ oder hier über
+              Pivots kommen per „vibegrowth decision add --pivot“ oder hier über
               „Entscheidung“.
             </EmptyDescription>
           </EmptyHeader>

@@ -121,7 +121,7 @@ export function renderPost(
       params
     )
     const tmp = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), "vibeshorts-")),
+      fs.mkdtempSync(path.join(os.tmpdir(), "vibegrowth-")),
       "manifest.json"
     )
     fs.writeFileSync(tmp, JSON.stringify(merged))

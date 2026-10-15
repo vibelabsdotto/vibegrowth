@@ -156,7 +156,7 @@ export default async function PostPage({
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Mit „vibeshorts render --post {post.id}“ rendern.
+              Mit „vibegrowth render --post {post.id}“ rendern.
             </p>
           )}
         </CardContent>

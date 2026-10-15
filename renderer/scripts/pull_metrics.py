@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetch public TikTok stats for one account and match posts to local folders.
 
-Called by `vibeshorts metrics pull`. Reads a JSON job from stdin, prints a JSON
+Called by `vibegrowth metrics pull`. Reads a JSON job from stdin, prints a JSON
 result to stdout. Storage, locking and freshness live in the CLI.
 
 Job:    {"handle": "jule.vegan", "account_dir": "/abs/amelie/jule",
@@ -30,7 +30,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-JOB = json.loads(os.environ.get('VIBESHORTS_JOB') or sys.stdin.read())
+JOB = json.loads(os.environ.get('VIBEGROWTH_JOB') or sys.stdin.read())
 
 try:
     from PIL import Image
@@ -40,9 +40,9 @@ try:
 except Exception:
     # The Homebrew yt-dlp Python ships curl_cffi; re-exec there once if this interpreter lacks it.
     brew = sorted(glob.glob('/opt/homebrew/Cellar/yt-dlp/*/libexec/bin/python'))
-    if brew and not os.environ.get('VIBESHORTS_REEXEC'):
-        os.environ['VIBESHORTS_REEXEC'] = '1'
-        os.environ['VIBESHORTS_JOB'] = json.dumps(JOB)
+    if brew and not os.environ.get('VIBEGROWTH_REEXEC'):
+        os.environ['VIBEGROWTH_REEXEC'] = '1'
+        os.environ['VIBEGROWTH_JOB'] = json.dumps(JOB)
         os.execv(brew[-1], [brew[-1], __file__])
     raise
 

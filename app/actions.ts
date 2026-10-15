@@ -329,7 +329,7 @@ export async function createRule(v: Values) {
         scopeId: String(v.scopeId),
         kind: s(v.kind) ?? "other",
         text: String(v.text ?? ""),
-        source: s(v.source) ?? "Max in VibeShorts",
+        source: s(v.source) ?? "Max in VibeGrowth",
       },
       WEB_ACTOR
     )
@@ -343,7 +343,7 @@ export async function replaceRule(id: number, v: Values) {
       id,
       {
         text: String(v.text ?? ""),
-        source: s(v.source) ?? "Max in VibeShorts",
+        source: s(v.source) ?? "Max in VibeGrowth",
         kind: s(v.kind) ?? undefined,
       },
       WEB_ACTOR
@@ -364,7 +364,7 @@ export async function createImageError(v: Values) {
         countermeasure: String(v.countermeasure ?? ""),
         detection: s(v.detection),
         formatIds: tags(v.formatIds),
-        source: s(v.source) ?? "Max in VibeShorts",
+        source: s(v.source) ?? "Max in VibeGrowth",
       },
       WEB_ACTOR
     )

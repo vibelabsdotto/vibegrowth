@@ -1,5 +1,5 @@
 {
-  "name": "vibeshorts",
+  "name": "vibegrowth",
   "version": "0.0.1",
   "type": "module",
   "private": true,
@@ -50,9 +50,10 @@
     "tsx": "^4.23.15",
     "typescript": "^5"
   },
-  "description": "Lokales Content-Studio für Shortform: Kalender, Formate, Regeln, Learnings und Zahlen in SQLite, bedienbar per Web-App und CLI.",
+  "description": "Lokales Growth-Studio für alle VibeLabs-Projekte: Shortform (Kalender, Formate, Regeln, Posts, Zahlen) und Website-/App-Growth (Funnel, Collector, Content-Pipeline, Experimente, GEO, Stores) in SQLite, bedienbar per Web-App und CLI.",
   "license": "MIT",
   "bin": {
+    "vibegrowth": "bin/vibegrowth.mjs",
     "vibeshorts": "bin/vibeshorts.mjs"
   },
   "engines": {

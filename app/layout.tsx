@@ -12,8 +12,8 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" })
 
 export const metadata: Metadata = {
-  title: { default: "VibeShorts", template: "%s · VibeShorts" },
-  description: "Lokales Content-Studio für Shortform.",
+  title: { default: "VibeGrowth", template: "%s · VibeGrowth" },
+  description: "Lokales Growth-Studio: Shortform, Websites und Apps.",
 }
 
 export default function RootLayout({

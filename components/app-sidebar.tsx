@@ -97,7 +97,7 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton render={<Link href="/" prefetch={false} />}>
                 <Clapperboard aria-hidden="true" />
-                <span className="font-semibold">VibeShorts</span>
+                <span className="font-semibold">VibeGrowth</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

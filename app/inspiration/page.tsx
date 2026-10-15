@@ -81,7 +81,7 @@ export default async function InspirationPage({
           <EmptyHeader>
             <EmptyTitle>Nichts gespeichert</EmptyTitle>
             <EmptyDescription>
-              Links per „vibeshorts inspo add &lt;url&gt;“ oder über „Link
+              Links per „vibegrowth inspo add &lt;url&gt;“ oder über „Link
               speichern“.
             </EmptyDescription>
           </EmptyHeader>
