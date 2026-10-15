@@ -82,7 +82,9 @@ export default async function ExperimentPage({
             </Link>
             <span>· {metricName}</span>
             {e.target ? (
-              <span className="font-mono text-xs">· {e.target}</span>
+              <span>
+                · <span className="font-mono text-xs">{e.target}</span>
+              </span>
             ) : null}
             <span>· angelegt von {actorLabel(e.actor)}</span>
           </span>

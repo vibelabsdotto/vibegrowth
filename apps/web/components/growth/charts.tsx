@@ -11,6 +11,8 @@ import {
 } from "recharts"
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   type ChartConfig,
 } from "@/components/ui/chart"
@@ -57,7 +59,7 @@ function ChangeMarker({
         y={y}
         dy="0.35em"
         textAnchor="middle"
-        className="fill-background text-[10px] font-semibold"
+        className="fill-(--status-warn-foreground) text-[10px] font-semibold"
       >
         {n}
       </text>
@@ -158,7 +160,10 @@ export function MarkedLineChart({
   }
   const clamp = (d: string) =>
     !first || !last ? d : d < first ? first : d > last ? last : d
-  const keys = Object.keys(config)
+  // Series without a single value would only add an empty legend entry.
+  const keys = Object.keys(config).filter((k) =>
+    data.some((d) => typeof d[k] === "number")
+  )
   const format = percent ? (v: number) => fmtPct(v) : fmtNum
 
   return (
@@ -192,11 +197,13 @@ export function MarkedLineChart({
               x1={clamp(a.from)}
               x2={clamp(a.to)}
               ifOverflow="hidden"
-              className={
+              // Recharts writes fill="#ccc" on the rect itself; a class on the group loses.
+              fill={
                 a.tone === "info"
-                  ? "fill-(--status-info)/10"
-                  : "fill-muted-foreground/10"
+                  ? "var(--status-info)"
+                  : "var(--muted-foreground)"
               }
+              fillOpacity={a.tone === "info" ? 0.12 : 0.1}
               label={{
                 value: a.label,
                 position: "insideTopLeft",
@@ -237,6 +244,9 @@ export function MarkedLineChart({
             />
           )}
         />
+        {keys.length > 1 ? (
+          <ChartLegend content={<ChartLegendContent />} />
+        ) : null}
         {keys.map((k) => (
           <Line
             key={k}
@@ -277,7 +287,7 @@ export function ChangeLegend({
     <ol className="flex flex-col gap-1 text-xs">
       {shown.map((c, i) => (
         <li key={c.id} className="flex gap-2">
-          <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-(--status-warn) text-[10px] font-semibold text-background tabular-nums">
+          <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-(--status-warn) text-[10px] font-semibold text-(--status-warn-foreground) tabular-nums">
             {i + 1}
           </span>
           <span className="shrink-0 text-muted-foreground tabular-nums">

@@ -411,7 +411,8 @@ export class ExperimentsService {
     const ctx = this.ctx
     const e = getById(ctx, experiments, id, "Experiment")
     const w = windows(e)
-    const end = w.after.to < yesterday() ? w.after.to : yesterday()
+    // Through today, so changes logged today get a marker on the chart (today has no numbers yet).
+    const end = w.after.to < today() ? w.after.to : today()
     const { days } = metricDays(ctx, e, w.baseline.from, end)
     const series: {
       date: string

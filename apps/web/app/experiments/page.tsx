@@ -55,7 +55,8 @@ export default async function ExperimentsPage({
   const sp = await searchParams
   const project = sp.project ?? ""
   const range = RANGES[sp.range ?? ""] ? sp.range! : "90"
-  const to = addDays(localToday(), -1)
+  // Up to today, so a change logged today shows in the log and as a marker (today's numbers are still empty).
+  const to = localToday()
   const from = addDays(to, -(RANGES[range] - 1))
 
   const [expRes, projectsRes, changesRes] = await Promise.all([
@@ -67,8 +68,13 @@ export default async function ExperimentsPage({
     (p) => p.status !== "archived"
   )
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
-  // The traffic chart needs one project; default to the first one.
-  const chartProject = project || projects[0]?.id || ""
+  // The traffic chart needs one project; default to the one with the most logged changes.
+  const changeCount = (id: string) =>
+    (changesRes.data ?? []).filter((c) => c.projectId === id).length
+  const busiest = [...projects].sort(
+    (a, b) => changeCount(b.id) - changeCount(a.id)
+  )[0]
+  const chartProject = project || busiest?.id || ""
   const [clicksRes, sessionsRes] = chartProject
     ? await Promise.all([
         load<KpiRow[]>("/kpi", {

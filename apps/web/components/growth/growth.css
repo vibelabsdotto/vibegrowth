@@ -5,6 +5,8 @@
   --status-warn: oklch(0.68 0.15 70);
   --status-bad: oklch(0.577 0.215 27);
   --status-info: oklch(0.55 0.15 255);
+  /* text on --status-warn fills (change markers); dark in both themes */
+  --status-warn-foreground: oklch(0.2 0.03 70);
 }
 
 .dark {

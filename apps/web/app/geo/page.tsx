@@ -92,11 +92,18 @@ export default async function GeoPage({
   searchParams: Promise<{ project?: string }>
 }) {
   const sp = await searchParams
-  const projectsRes = await load<Project[]>("/projects")
+  const [projectsRes, allQuestionsRes] = await Promise.all([
+    load<Project[]>("/projects"),
+    sp.project ? null : load<GeoQuestion[]>("/geo/questions"),
+  ])
   const projects = (projectsRes.data ?? []).filter(
     (p) => p.status !== "archived"
   )
-  const project = sp.project || projects[0]?.id || ""
+  // Without a choice, open the first project that has GEO questions.
+  const withQuestions = projects.find((p) =>
+    list<GeoQuestion>(allQuestionsRes?.data).some((q) => q.projectId === p.id)
+  )
+  const project = sp.project || withQuestions?.id || projects[0]?.id || ""
   const [questionsRes, checksRes, mentionsRes] = project
     ? await Promise.all([
         load<GeoQuestion[]>("/geo/questions", { project }),
@@ -322,7 +329,8 @@ export default async function GeoPage({
             <CardHeader>
               <CardTitle>Fragen × Lauf</CardTitle>
               <CardDescription>
-                Zahl = Position der Nennung, Strich = nicht genannt
+                Zahl = Position der Nennung, * = mit Link zitiert, Strich =
+                nicht genannt, Warndreieck = Abfrage fehlgeschlagen
               </CardDescription>
             </CardHeader>
             <CardContent>

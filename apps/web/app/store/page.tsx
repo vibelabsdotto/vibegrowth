@@ -29,7 +29,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { KpiRow, Project, StoreReview } from "@/lib/growth-types"
+import type {
+  Channel,
+  KpiRow,
+  Project,
+  StoreReview,
+} from "@/lib/growth-types"
 import { cn } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
@@ -47,14 +52,25 @@ export default async function StorePage({
   searchParams: Promise<{ project?: string }>
 }) {
   const sp = await searchParams
-  const projectsRes = await load<Project[]>("/projects")
+  const [projectsRes, channelsRes] = await Promise.all([
+    load<Project[]>("/projects"),
+    sp.project ? null : load<Channel[]>("/channels"),
+  ])
   const projects = (projectsRes.data ?? []).filter(
     (p) => p.status !== "archived" && p.kind !== "website"
   )
   const allProjects = (projectsRes.data ?? []).filter(
     (p) => p.status !== "archived"
   )
-  const project = sp.project || projects[0]?.id || allProjects[0]?.id || ""
+  // Without a choice, open the first project that has a live store listing.
+  const storeChannels = list<Channel>(channelsRes?.data).filter(
+    (c) => (c.kind === "android" || c.kind === "ios") && c.status === "active"
+  )
+  const withStore = projects.find((p) =>
+    storeChannels.some((c) => c.projectId === p.id)
+  )
+  const project =
+    sp.project || withStore?.id || projects[0]?.id || allProjects[0]?.id || ""
   const to = addDays(localToday(), -1)
   const from = addDays(to, -(DAYS - 1))
   const prevFrom = addDays(from, -DAYS)

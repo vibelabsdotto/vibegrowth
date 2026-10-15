@@ -279,7 +279,7 @@ export default async function ProjectPage({
                       <Link
                         href={`/experiments/${e.id}`}
                         prefetch={false}
-                        className="min-w-0 flex-1 truncate font-medium underline-offset-4 hover:underline"
+                        className="min-w-0 basis-full truncate font-medium underline-offset-4 hover:underline sm:flex-1 sm:basis-0"
                       >
                         {e.title}
                       </Link>
@@ -333,7 +333,9 @@ export default async function ProjectPage({
                       key={b.id}
                       className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm first:pt-0 last:pb-0"
                     >
-                      <span className="min-w-0 flex-1 truncate">{b.title}</span>
+                      <span className="min-w-0 basis-full truncate sm:flex-1 sm:basis-0">
+                        {b.title}
+                      </span>
                       {b.status === "doing" ? (
                         <Badge variant="secondary">in Arbeit</Badge>
                       ) : null}
