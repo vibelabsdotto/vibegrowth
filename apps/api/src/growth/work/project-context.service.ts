@@ -195,12 +195,14 @@ export class ProjectContextService {
         status: "active",
       }),
       ...listLearnings(ctx, { scopeType: "global", status: "active" }),
+      ...listLearnings(ctx, { scopeType: "growth", status: "active" }),
     ].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
     const decisions = listDecisions(ctx)
       .filter(
         (d) =>
           (d.scopeType === "brand" && d.scopeId === p.id) ||
-          d.scopeType === "global"
+          d.scopeType === "global" ||
+          d.scopeType === "growth"
       )
       .slice(0, 20)
 

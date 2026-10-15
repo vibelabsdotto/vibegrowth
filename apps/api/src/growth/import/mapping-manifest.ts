@@ -356,6 +356,6 @@ export const MAPPING: MappingEntry[] = [
     "README.md ## Learnings",
     "learnings",
     "umgewandelt",
-    "Scope brand=<Site> wenn als Projekt bekannt, alle → global; evidence = Sätze mit Belegsignal, sonst Verweis auf den README-Eintrag; source Website-Growth README"
+    "Scope brand=<Site> wenn als Projekt bekannt, alle → growth (gilt für die Growth-Arbeit aller Projekte, nicht für Shorts-Accounts); evidence = Sätze mit Belegsignal, sonst Verweis auf den README-Eintrag; source Website-Growth README"
   ),
 ]

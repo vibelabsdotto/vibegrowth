@@ -36,6 +36,13 @@
       "when": 1792091554565,
       "tag": "0004_import_source_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792093609941,
+      "tag": "0005_growth_learning_scope",
+      "breakpoints": true
     }
   ]
 }

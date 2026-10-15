@@ -31,6 +31,8 @@ export default async function LearningsPage({
   const scopeName = (t: string, id: string | null) =>
     t === "global"
       ? "alle"
+      : t === "growth"
+        ? "Growth (alle Projekte)"
       : t === "account"
         ? (accounts.find((a) => a.id === id)?.name ?? id)
         : t === "brand"

@@ -1889,7 +1889,8 @@ export class GrowthImportService {
         continue
       }
       const site = it.site.toLowerCase()
-      let scopeType = "global"
+      // Site-wide website learnings apply to growth work, not to shortform accounts.
+      let scopeType = "growth"
       let scopeId: string | null = null
       if (!["alle", "all", "global"].includes(site)) {
         const id =
@@ -1899,7 +1900,7 @@ export class GrowthImportService {
           scopeId = id
         } else
           report.warn(
-            `Learning ${it.date} (${it.site}): Site ohne Projekt, global übernommen`
+            `Learning ${it.date} (${it.site}): Site ohne Projekt, als growth übernommen`
           )
       }
       addLearning(

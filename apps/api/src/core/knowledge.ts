@@ -23,7 +23,14 @@ import {
   VSError,
 } from "./util"
 
-export const LEARNING_SCOPES = ["account", "brand", "format", "global"] as const
+/** growth: applies to the growth work of every project, never to shortform accounts */
+export const LEARNING_SCOPES = [
+  "account",
+  "brand",
+  "format",
+  "global",
+  "growth",
+] as const
 export const INSPO_TYPES = [
   "format",
   "hook",
@@ -40,7 +47,7 @@ function checkScope(
   scopeId: string | null | undefined
 ) {
   oneOf(scopeType, LEARNING_SCOPES, "scope")
-  if (scopeType === "global") return null
+  if (scopeType === "global" || scopeType === "growth") return null
   if (!scopeId)
     throw new VSError(
       "INVALID",

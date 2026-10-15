@@ -885,10 +885,16 @@ metricsCmd
 
 // ---------- learnings, decisions, hooks, inspiration ----------
 
-function scopeFrom(o: { account?: string; brand?: string; format?: string }) {
+function scopeFrom(o: {
+  account?: string
+  brand?: string
+  format?: string
+  growth?: boolean
+}) {
   if (o.account) return { scopeType: "account", scopeId: o.account }
   if (o.brand) return { scopeType: "brand", scopeId: o.brand }
   if (o.format) return { scopeType: "format", scopeId: o.format }
+  if (o.growth) return { scopeType: "growth", scopeId: null }
   return { scopeType: "global", scopeId: null }
 }
 
@@ -909,6 +915,7 @@ projectAlias(
   learningCmd.command("add").option("--account <id>").option("--brand <id>")
 )
   .option("--format <id>")
+  .option("--growth", "gilt für die Growth-Arbeit aller Projekte (nicht für Shorts)")
   .requiredOption("--statement <text>")
   .requiredOption("--evidence <text>", "Beleg: Posts und Zahlen")
   .option("--posts <ids>", "Post-IDs als Beleg, kommagetrennt")
@@ -962,6 +969,7 @@ projectAlias(
     .option("--brand <id>")
 )
   .option("--format <id>")
+  .option("--growth", "gilt für die Growth-Arbeit aller Projekte (nicht für Shorts)")
   .option("--date <date>")
   .option("--supersedes <id>", "ersetzt Entscheidung", int)
   .option("--source <text>")
