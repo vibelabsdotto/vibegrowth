@@ -9,8 +9,11 @@ import { GUIDE_LABEL } from "@/lib/labels"
 
 export function NewFormat({
   brands,
+  brand,
 }: {
   brands: { value: string; label: string }[]
+  /** Project from the sidebar switcher, preselected. */
+  brand?: string
 }) {
   const router = useRouter()
   return (
@@ -22,15 +25,15 @@ export function NewFormat({
           Format anlegen
         </Button>
       )}
-      initial={{ brandId: "", rendererParams: '{"style":"native"}' }}
+      initial={{ brandId: brand ?? "", rendererParams: '{"style":"native"}' }}
       fields={[
         { name: "name", label: "Name", required: true },
         { name: "id", label: "ID", placeholder: "leer = aus dem Namen" },
         {
           name: "brandId",
-          label: "Brand",
+          label: "Projekt",
           type: "select",
-          options: [{ value: "", label: "alle" }, ...brands],
+          options: [{ value: "", label: "geteilt (alle Projekte)" }, ...brands],
         },
         { name: "description", label: "Beschreibung", type: "textarea" },
         {

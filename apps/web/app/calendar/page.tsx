@@ -3,7 +3,8 @@ import { PageHeader } from "@/components/page-header"
 import { PlanCalendar, type CalendarAccount } from "@/components/plan-calendar"
 import { apiFetch } from "@/lib/api"
 import { isDate, localToday, monthGrid, range, weekStart } from "@/lib/dates"
-import { listBrands } from "@/lib/server"
+import { NoAccounts, ScopedDescription } from "@/components/scope-badge"
+import { formatsInScope, projectScope } from "@/lib/server"
 import type {
   AccountRow,
   CalendarPost,
@@ -20,8 +21,9 @@ export const metadata = { title: "Kalender" }
 type Search = Promise<{
   view?: string
   date?: string
-  brand?: string
   accounts?: string
+  /** Scope the account selection was made in (project id or "all"). */
+  for?: string
 }>
 
 export default async function CalendarPage({
@@ -43,15 +45,24 @@ export default async function CalendarPage({
   const from = grid[0]
   const to = grid[grid.length - 1]
 
-  const [brands, rawAccounts, allPosts, inspos, formats] = await Promise.all([
-    listBrands(),
-    apiFetch<AccountRow[]>("/accounts"),
-    apiFetch<PostRow[]>("/posts"),
-    apiFetch<InspirationRow[]>("/inspo"),
-    apiFetch<FormatRow[]>("/formats"),
-  ])
-  const brand =
-    sp.brand && brands.some((b) => b.id === sp.brand) ? sp.brand : ""
+  const [{ projects, project }, everyAccount, allPosts, inspos, allFormats] =
+    await Promise.all([
+      projectScope(),
+      apiFetch<AccountRow[]>("/accounts"),
+      apiFetch<PostRow[]>("/posts"),
+      apiFetch<InspirationRow[]>("/inspo"),
+      apiFetch<FormatRow[]>("/formats"),
+    ])
+  const brand = project?.id
+  // Project from the switcher: only its accounts (and through them its entries and posts).
+  const projectName = Object.fromEntries(projects.map((p) => [p.id, p.name]))
+  const rawAccounts = everyAccount
+    .filter((a) => !brand || a.brandId === brand)
+    .sort((a, b) =>
+      (projectName[a.brandId] ?? a.brandId).localeCompare(
+        projectName[b.brandId] ?? b.brandId
+      )
+    )
   // Horizon counts from the API's today (same local date as localToday on this machine).
   const horizons = await Promise.all(
     rawAccounts.map((a) =>
@@ -64,14 +75,21 @@ export default async function CalendarPage({
       id: a.id,
       name: a.name,
       brandId: a.brandId,
+      projectName: projectName[a.brandId] ?? a.brandId,
       defaultFormatId: a.defaultFormatId,
       horizon: { filledDays: h.filledDays, days: h.days },
     }
   })
-  const selected = sp.accounts ? sp.accounts.split(",").filter(Boolean) : null
+  // An account selection belongs to the scope it was made in (?for=); after switching the
+  // project it no longer applies and the default selection returns.
+  const scopeKey = project?.id ?? "all"
+  const raw = sp.for === scopeKey ? sp.accounts : undefined
+  const picked = raw
+    ? raw.split(",").filter((id) => allAccounts.some((a) => a.id === id))
+    : []
+  const selected = raw === "none" || picked.length ? picked : null
   // Default: active accounts and everything that already has a plan. Others can be toggled on.
   const accounts = allAccounts.filter((a) => {
-    if (brand && a.brandId !== brand) return false
     if (selected) return selected.includes(a.id)
     return (
       rawAccounts.find((x) => x.id === a.id)!.status === "active" ||
@@ -82,12 +100,18 @@ export default async function CalendarPage({
 
   // GET /plan filters one account or brand; the calendar shows a selection, so filter here.
   const [plan, ideaPool] = await Promise.all([
-    apiFetch<PlanEntryRow[]>("/plan", { query: { from, to } }),
-    apiFetch<PlanEntryRow[]>("/plan", { query: { ideas: true } }),
+    apiFetch<PlanEntryRow[]>("/plan", { query: { from, to, brand } }),
+    apiFetch<PlanEntryRow[]>("/plan", { query: { ideas: true, brand } }),
   ])
   const entries = plan.filter((e) => ids.has(e.accountId))
   const posts: CalendarPost[] = allPosts
-    .filter((x) => x.status === "posted" && !x.planEntryId && x.postedAt)
+    .filter(
+      (x) =>
+        ids.has(x.accountId) &&
+        x.status === "posted" &&
+        !x.planEntryId &&
+        x.postedAt
+    )
     .map((x) => ({
       id: x.id,
       accountId: x.accountId,
@@ -102,36 +126,63 @@ export default async function CalendarPage({
     if (x.planEntryId) postsByEntry[x.planEntryId] = { id: x.id, label: x.slug }
 
   const ideas = ideaPool.filter((e) => ids.has(e.accountId))
-  const inspirations = inspos.map((i) => ({
-    id: i.id,
-    label: (i.note ?? i.url).slice(0, 80),
-  }))
+  // Inspiration of the project (own brand or one of its accounts) plus cross-project links.
+  const accountIds = new Set(rawAccounts.map((a) => a.id))
+  const inspirations = inspos
+    .filter(
+      (i) =>
+        !project ||
+        i.brandId === project.id ||
+        (i.accountId && accountIds.has(i.accountId)) ||
+        (!i.brandId && !i.accountId)
+    )
+    .map((i) => ({
+      id: i.id,
+      label: (i.note ?? i.url).slice(0, 80),
+    }))
+
+  const referenced = new Set(
+    [...entries, ...ideas].map((e) => e.formatId).filter(Boolean)
+  )
+  const scopedFormats = formatsInScope(allFormats, project, rawAccounts)
+  const formats = allFormats.filter(
+    (f) => scopedFormats.includes(f) || referenced.has(f.id)
+  )
 
   return (
     <div className="mx-auto flex w-full max-w-[110rem] min-w-0 flex-col gap-6">
       <PageHeader
         title="Kalender"
-        description="Alle Accounts. Der Agent plant drei Wochen im Voraus, du verschiebst, sperrst und legst an, wo du willst."
+        description={
+          <ScopedDescription project={project}>
+            Der Agent plant drei Wochen im Voraus, du verschiebst, sperrst und
+            legst an, wo du willst.
+          </ScopedDescription>
+        }
       />
-      <Suspense>
-        <PlanCalendar
-          view={view}
-          anchor={anchor}
-          today={today}
-          days={grid}
-          weeks={weeks}
-          brands={brands.map((b) => ({ id: b.id, name: b.name }))}
-          brand={brand}
-          allAccounts={allAccounts}
-          accounts={accounts}
-          entries={entries}
-          posts={posts}
-          ideas={ideas}
-          formats={formats.map((f) => ({ id: f.id, name: f.name }))}
-          inspirations={inspirations}
-          postsByEntry={postsByEntry}
-        />
-      </Suspense>
+      {project && !allAccounts.length ? (
+        <NoAccounts project={project} what="gibt es keinen Plan" />
+      ) : (
+        <Suspense>
+          <PlanCalendar
+            view={view}
+            anchor={anchor}
+            today={today}
+            days={grid}
+            weeks={weeks}
+            showProject={!project}
+            scopeKey={scopeKey}
+            allAccounts={allAccounts}
+            accounts={accounts}
+            entries={entries}
+            posts={posts}
+            ideas={ideas}
+            formats={formats.map((f) => ({ id: f.id, name: f.name }))}
+            inspirations={inspirations}
+            postsByEntry={postsByEntry}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

@@ -20,7 +20,9 @@ import {
   INSPO_TYPE_LABEL,
   options,
 } from "@/lib/labels"
+import { ScopedDescription } from "@/components/scope-badge"
 import { apiFetch, mediaUrl } from "@/lib/api"
+import { projectScope } from "@/lib/server"
 import type { AccountRow, InspirationRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -32,33 +34,61 @@ export default async function InspirationPage({
   searchParams: Promise<{ account?: string; status?: string; type?: string }>
 }) {
   const sp = await searchParams
-  const [accounts, items] = await Promise.all([
+  const [{ projects, project }, everyAccount] = await Promise.all([
+    projectScope(),
     apiFetch<AccountRow[]>("/accounts"),
-    apiFetch<InspirationRow[]>("/inspo", {
+  ])
+  const accounts = everyAccount.filter(
+    (a) => !project || a.brandId === project.id
+  )
+  const account = accounts.some((a) => a.id === sp.account) ? sp.account : ""
+  const ids = new Set(accounts.map((a) => a.id))
+  // Project from the switcher: links of the project (brand or one of its accounts) plus links
+  // without project and account, which are open for every project and marked as such.
+  const items = (
+    await apiFetch<InspirationRow[]>("/inspo", {
       query: {
-        account: sp.account || undefined,
+        account: account || undefined,
         status: sp.status || undefined,
         type: sp.type || undefined,
       },
-    }),
-  ])
+    })
+  ).filter(
+    (i) =>
+      !project ||
+      i.brandId === project.id ||
+      (i.accountId && ids.has(i.accountId)) ||
+      (!i.brandId && !i.accountId)
+  )
   const accOpts = accounts.map((a) => ({ value: a.id, label: a.name }))
+  const projectOf = (i: InspirationRow) =>
+    i.brandId ?? everyAccount.find((a) => a.id === i.accountId)?.brandId
+  const projectName = (id: string | undefined) =>
+    projects.find((p) => p.id === id)?.name ?? id
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Inspiration"
-        description="Links, Trends und analysierte Referenzen. Daraus geplante Einträge stehen am Link."
+        description={
+          <ScopedDescription project={project}>
+            Links, Trends und analysierte Referenzen. Daraus geplante Einträge
+            stehen am Link.
+            {project ? " Links ohne Projekt sind für alle offen." : ""}
+          </ScopedDescription>
+        }
         actions={
           <>
             <Suspense>
-              <UrlSelect
-                param="account"
-                label="Account"
-                allLabel="Alle Accounts"
-                value={sp.account ?? ""}
-                options={accOpts}
-              />
+              {accounts.length ? (
+                <UrlSelect
+                  param="account"
+                  label="Account"
+                  allLabel="Alle Accounts"
+                  value={account ?? ""}
+                  options={accOpts}
+                />
+              ) : null}
               <UrlSelect
                 param="status"
                 label="Status"
@@ -74,14 +104,22 @@ export default async function InspirationPage({
                 options={options(INSPO_TYPE_LABEL)}
               />
             </Suspense>
-            <NewInspiration accounts={accOpts} />
+            <NewInspiration
+              accounts={accOpts}
+              brands={projects.map((b) => ({ value: b.id, label: b.name }))}
+              brand={project?.id}
+            />
           </>
         }
       />
       {items.length === 0 ? (
         <Empty>
           <EmptyHeader>
-            <EmptyTitle>Nichts gespeichert</EmptyTitle>
+            <EmptyTitle>
+              {project
+                ? `Keine Inspiration für ${project.name}`
+                : "Nichts gespeichert"}
+            </EmptyTitle>
             <EmptyDescription>
               Links per „vibegrowth inspo add &lt;url&gt;“ oder über „Link
               speichern“.
@@ -113,9 +151,17 @@ export default async function InspirationPage({
                     <Badge variant="secondary">
                       {INSPO_TYPE_LABEL[i.type] ?? i.type}
                     </Badge>
+                    {!projectOf(i) ? (
+                      <Badge variant="outline">projektübergreifend</Badge>
+                    ) : project ? null : (
+                      <Badge variant="outline">
+                        {projectName(projectOf(i))}
+                      </Badge>
+                    )}
                     {i.accountId ? (
                       <Badge variant="outline">
-                        {accounts.find((a) => a.id === i.accountId)?.name}
+                        {everyAccount.find((a) => a.id === i.accountId)?.name ??
+                          i.accountId}
                       </Badge>
                     ) : null}
                     {i.tags.map((t) => (

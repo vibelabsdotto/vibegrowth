@@ -22,7 +22,9 @@ import {
   options,
   POST_STATUS_LABEL,
 } from "@/lib/labels"
+import { NoAccounts, ScopedDescription } from "@/components/scope-badge"
 import { apiFetch, mediaUrl } from "@/lib/api"
+import { projectScope } from "@/lib/server"
 import type { AccountRow, AccountStats, PostRow } from "@/lib/types"
 import { UrlSelect } from "@/components/url-select"
 import { Suspense } from "react"
@@ -36,16 +38,31 @@ export default async function PostsPage({
   searchParams: Promise<{ account?: string; status?: string }>
 }) {
   const sp = await searchParams
-  const [accounts, posts] = await Promise.all([
+  const [{ projects, project }, everyAccount] = await Promise.all([
+    projectScope(),
     apiFetch<AccountRow[]>("/accounts"),
-    apiFetch<PostRow[]>("/posts", {
+  ])
+  // Project from the switcher: its accounts only; an account filter from another project is ignored.
+  const accounts = everyAccount.filter(
+    (a) => !project || a.brandId === project.id
+  )
+  const account = accounts.some((a) => a.id === sp.account) ? sp.account : ""
+  const ids = new Set(accounts.map((a) => a.id))
+  const posts = (
+    await apiFetch<PostRow[]>("/posts", {
       query: {
-        account: sp.account || undefined,
+        account: account || undefined,
         status: sp.status || undefined,
       },
-    }),
-  ])
+    })
+  ).filter((p) => ids.has(p.accountId))
   const name = Object.fromEntries(accounts.map((a) => [a.id, a.name]))
+  const projectOf = Object.fromEntries(
+    accounts.map((a) => [
+      a.id,
+      projects.find((b) => b.id === a.brandId)?.name ?? a.brandId,
+    ])
+  )
   const allStats = await Promise.all(
     accounts.map((a) =>
       apiFetch<AccountStats>("/metrics", { query: { account: a.id } })
@@ -61,16 +78,23 @@ export default async function PostsPage({
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Posts"
-        description="Alle Post-Ordner mit Hook, Slides und Zahlen. Mediendateien bleiben, wo sie sind."
+        description={
+          <ScopedDescription project={project}>
+            Post-Ordner mit Hook, Slides und Zahlen. Mediendateien bleiben, wo
+            sie sind.
+          </ScopedDescription>
+        }
         actions={
           <Suspense>
-            <UrlSelect
-              param="account"
-              label="Account"
-              allLabel="Alle Accounts"
-              value={sp.account ?? ""}
-              options={accounts.map((a) => ({ value: a.id, label: a.name }))}
-            />
+            {accounts.length ? (
+              <UrlSelect
+                param="account"
+                label="Account"
+                allLabel="Alle Accounts"
+                value={account ?? ""}
+                options={accounts.map((a) => ({ value: a.id, label: a.name }))}
+              />
+            ) : null}
             <UrlSelect
               param="status"
               label="Status"
@@ -81,7 +105,9 @@ export default async function PostsPage({
           </Suspense>
         }
       />
-      {posts.length === 0 ? (
+      {project && !accounts.length ? (
+        <NoAccounts project={project} what="gibt es keine Posts" />
+      ) : posts.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>Keine Posts</EmptyTitle>
@@ -99,6 +125,7 @@ export default async function PostsPage({
                 <TableHead className="w-16">Slide 1</TableHead>
                 <TableHead>Hook</TableHead>
                 <TableHead>Account</TableHead>
+                {project ? null : <TableHead>Projekt</TableHead>}
                 <TableHead>Datum</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Plays</TableHead>
@@ -138,6 +165,11 @@ export default async function PostsPage({
                       </span>
                     </TableCell>
                     <TableCell>{name[p.accountId] ?? p.accountId}</TableCell>
+                    {project ? null : (
+                      <TableCell className="text-muted-foreground">
+                        {projectOf[p.accountId]}
+                      </TableCell>
+                    )}
                     <TableCell>{fmtDate(p.postedAt ?? p.date)}</TableCell>
                     <TableCell>
                       <span className="flex items-center gap-1">

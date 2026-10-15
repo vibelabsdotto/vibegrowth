@@ -25,18 +25,18 @@ const scopeFields = (accounts: Opt[], brands: Opt[]): FieldSpec[] => [
     type: "select",
     options: [
       { value: "account", label: "Account" },
-      { value: "brand", label: "Brand" },
+      { value: "brand", label: "Projekt" },
       { value: "global", label: "alle" },
     ],
   },
   {
     name: "scopeId",
-    label: "Account oder Brand",
+    label: "Account oder Projekt",
     type: "select",
     options: [
       { value: "", label: "–" },
       ...accounts,
-      ...brands.map((b) => ({ ...b, label: `Brand: ${b.label}` })),
+      ...brands.map((b) => ({ ...b, label: `Projekt: ${b.label}` })),
     ],
   },
 ]
@@ -65,20 +65,25 @@ export function NewLearning({
   accounts,
   brands,
   account,
+  brand,
 }: {
   accounts: Opt[]
   brands: Opt[]
   account?: string
+  /** Project from the sidebar switcher: preselected when it has no account. */
+  brand?: string
 }) {
+  const firstAccount = account ?? accounts[0]?.value
   return (
     <FormDrawer
       title="Learning hinzufügen"
       description="Jedes Learning braucht einen Beleg: welche Posts, welche Zahlen."
       trigger={AddButton({ label: "Learning" })}
-      initial={{
-        scopeType: "account",
-        scopeId: account ?? accounts[0]?.value ?? "",
-      }}
+      initial={
+        firstAccount || !brand
+          ? { scopeType: "account", scopeId: firstAccount ?? "" }
+          : { scopeType: "brand", scopeId: brand }
+      }
       fields={[
         ...scopeFields(accounts, brands),
         {
@@ -132,9 +137,12 @@ export function LearningStatusButton({
 export function NewDecision({
   accounts,
   brands,
+  brand,
 }: {
   accounts: Opt[]
   brands: Opt[]
+  /** Project from the sidebar switcher, preselected. */
+  brand?: string
 }) {
   return (
     <FormDrawer
@@ -143,7 +151,7 @@ export function NewDecision({
       trigger={AddButton({ label: "Entscheidung" })}
       initial={{
         scopeType: "brand",
-        scopeId: brands[0]?.value ?? "",
+        scopeId: brand ?? brands[0]?.value ?? "",
         pivot: false,
       }}
       fields={[
@@ -245,13 +253,23 @@ export function HookActions({
   )
 }
 
-export function NewInspiration({ accounts }: { accounts: Opt[] }) {
+export function NewInspiration({
+  accounts,
+  brands,
+  brand,
+}: {
+  /** Accounts of the project from the switcher (all for "Alle Projekte"). */
+  accounts: Opt[]
+  brands: Opt[]
+  /** Project from the sidebar switcher, preselected. */
+  brand?: string
+}) {
   return (
     <FormDrawer
       title="Inspiration speichern"
       description="Link einfügen, Rest ist optional."
       trigger={AddButton({ label: "Link speichern" })}
-      initial={{ type: "format", accountId: "" }}
+      initial={{ type: "format", brandId: brand ?? "", accountId: "" }}
       fields={[
         {
           name: "url",
@@ -265,6 +283,13 @@ export function NewInspiration({ accounts }: { accounts: Opt[] }) {
           label: "Typ",
           type: "select",
           options: options(INSPO_TYPE_LABEL),
+        },
+        {
+          name: "brandId",
+          label: "Projekt",
+          type: "select",
+          options: [{ value: "", label: "projektübergreifend" }, ...brands],
+          description: "Leer und ohne Account: für alle Projekte offen",
         },
         {
           name: "accountId",

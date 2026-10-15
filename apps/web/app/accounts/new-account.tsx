@@ -12,10 +12,13 @@ type Opt = { value: string; label: string }
 /** Guided account creation: record, folder structure (posts, persona, analysis, pulls) and optional new character. */
 export function NewAccount({
   brands,
+  brand,
   formats,
   characters,
 }: {
   brands: Opt[]
+  /** Project from the sidebar switcher, preselected. */
+  brand?: string
   formats: Opt[]
   characters: Opt[]
 }) {
@@ -32,7 +35,7 @@ export function NewAccount({
         </Button>
       )}
       initial={{
-        brandId: brands[0]?.value ?? "",
+        brandId: brand ?? brands[0]?.value ?? "",
         status: "planned",
         ctaRule: "engagement",
         postsPerDay: "1",
@@ -43,7 +46,7 @@ export function NewAccount({
       fields={[
         {
           name: "brandId",
-          label: "Brand",
+          label: "Projekt",
           type: "select",
           options: brands,
           required: true,
@@ -58,7 +61,7 @@ export function NewAccount({
           name: "id",
           label: "ID / Ordner-Slug",
           placeholder: "leer = aus dem Namen",
-          description: "Ordner wird <brand>/<id>",
+          description: "Ordner wird <projekt>/<id>",
         },
         {
           name: "handle",

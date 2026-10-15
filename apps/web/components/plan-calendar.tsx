@@ -23,7 +23,6 @@ import { moveEntry } from "@/app/actions"
 import { EntryDrawer, type EntryTarget } from "@/components/entry-drawer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { toast } from "@/components/ui/toast"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
@@ -45,6 +44,7 @@ import { cn } from "@/lib/utils"
 
 export type CalendarAccount = Lite & {
   brandId: string
+  projectName: string
   defaultFormatId: string | null
   horizon: { filledDays: number; days: number }
 }
@@ -55,8 +55,11 @@ export type CalendarProps = {
   today: string
   days: string[]
   weeks: string[][]
-  brands: Lite[]
-  brand: string
+  /** View "Alle Projekte": label accounts with their project. */
+  showProject: boolean
+  /** Current scope (project id or "all"); stored with an account selection. */
+  scopeKey: string
+  /** Accounts of the project chosen in the sidebar switcher (all of them for "Alle Projekte"). */
   allAccounts: CalendarAccount[]
   accounts: CalendarAccount[]
   entries: PlanEntryRow[]
@@ -222,6 +225,10 @@ export function PlanCalendar(p: CalendarProps) {
     () => Object.fromEntries(p.allAccounts.map((a) => [a.id, a.name])),
     [p.allAccounts]
   )
+  const projectOf = React.useMemo(
+    () => Object.fromEntries(p.allAccounts.map((a) => [a.id, a.projectName])),
+    [p.allAccounts]
+  )
   const visible = new Set(p.accounts.map((a) => a.id))
   const shownEntries = entries.filter((e) => visible.has(e.accountId))
   const byCell = React.useMemo(() => {
@@ -321,6 +328,11 @@ export function PlanCalendar(p: CalendarProps) {
               >
                 {a.name}
               </Link>
+              {p.showProject ? (
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {a.projectName}
+                </span>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -415,22 +427,7 @@ export function PlanCalendar(p: CalendarProps) {
               Monat
             </ToggleGroupItem>
           </ToggleGroup>
-          <NativeSelect
-            size="sm"
-            aria-label="Brand"
-            value={p.brand}
-            onChange={(e) =>
-              nav({ brand: e.target.value || null, accounts: null })
-            }
-          >
-            <NativeSelectOption value="">Alle Brands</NativeSelectOption>
-            {p.brands.map((b) => (
-              <NativeSelectOption key={b.id} value={b.id}>
-                {b.name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <Button size="sm" onClick={() => add(p.today)}>
+          <Button size="sm" onClick={() => add(p.today, p.accounts[0]?.id)}>
             <Plus data-icon="inline-start" aria-hidden="true" />
             Eintrag hinzufügen
           </Button>
@@ -442,29 +439,46 @@ export function PlanCalendar(p: CalendarProps) {
         role="group"
         aria-label="Accounts filtern"
       >
-        {p.allAccounts
-          .filter((a) => !p.brand || a.brandId === p.brand)
-          .map((a) => {
-            const on = visible.has(a.id)
-            return (
+        {p.allAccounts.map((a, i) => {
+          const on = visible.has(a.id)
+          const first =
+            p.showProject && p.allAccounts[i - 1]?.brandId !== a.brandId
+          return (
+            <React.Fragment key={a.id}>
+              {first ? (
+                <span
+                  className={cn(
+                    "text-xs font-medium text-muted-foreground",
+                    i > 0 && "ml-2"
+                  )}
+                >
+                  {a.projectName}:
+                </span>
+              ) : null}
               <Button
-                key={a.id}
                 size="xs"
                 variant={on ? "secondary" : "ghost"}
                 aria-pressed={on}
+                aria-label={
+                  p.showProject ? `${a.name} (${a.projectName})` : undefined
+                }
                 className={cn(!on && "text-muted-foreground line-through")}
                 onClick={() => {
                   const current = p.accounts.map((x) => x.id)
                   const next = on
                     ? current.filter((x) => x !== a.id)
                     : [...current, a.id]
-                  nav({ accounts: next.join(",") || "none" })
+                  nav({
+                    accounts: next.join(",") || "none",
+                    for: p.scopeKey,
+                  })
                 }}
               >
                 {a.name}
               </Button>
-            )
-          })}
+            </React.Fragment>
+          )
+        })}
         <span className="ml-2 text-xs text-muted-foreground">
           Dunkler Rahmen: von Max angelegt oder gesperrt · Grau: produziert ·
           gestrichelt: Idee oder Post ohne Eintrag
@@ -561,7 +575,12 @@ export function PlanCalendar(p: CalendarProps) {
                 className="flex min-w-0 flex-col gap-1 rounded-md border border-dashed bg-card p-2 text-left text-xs hover:bg-accent"
               >
                 <span className="flex items-center gap-1.5">
-                  <Badge variant="outline">{accountName[e.accountId]}</Badge>
+                  <Badge variant="outline">
+                    {accountName[e.accountId]}
+                    {p.showProject && projectOf[e.accountId]
+                      ? ` · ${projectOf[e.accountId]}`
+                      : ""}
+                  </Badge>
                   {e.angle ? (
                     <span className="truncate text-muted-foreground">
                       {e.angle}

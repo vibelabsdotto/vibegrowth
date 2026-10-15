@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/card"
 import { apiFetch, mediaUrl } from "@/lib/api"
 import { ACCOUNT_STATUS_LABEL, CTA_LABEL, fmtNum } from "@/lib/labels"
-import { listBrands } from "@/lib/server"
+import { NoAccounts, ScopedDescription } from "@/components/scope-badge"
+import { formatsInScope, projectScope } from "@/lib/server"
 import type {
   AccountRow,
   AccountShow,
@@ -26,13 +27,27 @@ export const dynamic = "force-dynamic"
 export const metadata = { title: "Accounts" }
 
 export default async function AccountsPage() {
-  const [brands, formats, characters, accounts, posts] = await Promise.all([
-    listBrands(),
-    apiFetch<FormatRow[]>("/formats"),
-    apiFetch<CharacterRow[]>("/characters"),
-    apiFetch<AccountRow[]>("/accounts"),
-    apiFetch<PostRow[]>("/posts"),
-  ])
+  const [{ projects: brands, project }, formats, characters, all, posts] =
+    await Promise.all([
+      projectScope(),
+      apiFetch<FormatRow[]>("/formats"),
+      apiFetch<CharacterRow[]>("/characters"),
+      apiFetch<AccountRow[]>("/accounts"),
+      apiFetch<PostRow[]>("/posts"),
+    ])
+  // Project from the switcher: its accounts only; "Alle Projekte" groups them by project.
+  const accounts = all.filter((a) => !project || a.brandId === project.id)
+  const sections = project
+    ? accounts.length
+      ? [project]
+      : []
+    : brands.filter(
+        (b) => b.status !== "archived" || all.some((a) => a.brandId === b.id)
+      )
+  const formatOpts = formatsInScope(formats, project, accounts)
+  const characterOpts = characters.filter(
+    (ch) => !project || !ch.brandId || ch.brandId === project.id
+  )
   // Per account: show (active format, stats) and the 3-week horizon.
   const detail = new Map(
     await Promise.all(
@@ -55,23 +70,38 @@ export default async function AccountsPage() {
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Accounts"
-        description="Posting-Accounts mit Modus, CTA-Regel, Format und KI-Charakter."
+        description={
+          <ScopedDescription project={project}>
+            Posting-Accounts mit Modus, CTA-Regel, Format und KI-Charakter.
+          </ScopedDescription>
+        }
         actions={
           <NewAccount
             brands={brands.map((b) => ({ value: b.id, label: b.name }))}
-            formats={formats.map((f) => ({ value: f.id, label: f.name }))}
-            characters={characters.map((ch) => ({
+            brand={project?.id}
+            formats={formatOpts.map((f) => ({ value: f.id, label: f.name }))}
+            characters={characterOpts.map((ch) => ({
               value: ch.id,
               label: ch.name,
             }))}
           />
         }
       />
-      {brands.map((b) => (
+      {project && !accounts.length ? (
+        <NoAccounts project={project} link={false} />
+      ) : null}
+      {sections.map((b) => (
         <section key={b.id} className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground">
-            {b.name}
-          </h2>
+          {project ? null : (
+            <h2 className="text-sm font-semibold text-muted-foreground">
+              {b.name}
+            </h2>
+          )}
+          {project || accounts.some((a) => a.brandId === b.id) ? null : (
+            <p className="text-sm text-muted-foreground">
+              Keine Shortform-Accounts.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {accounts
               .filter((a) => a.brandId === b.id)

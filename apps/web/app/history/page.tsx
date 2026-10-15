@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ScopedDescription } from "@/components/scope-badge"
 import { UrlSelect } from "@/components/url-select"
 import { actorLabel, fmtDateTime } from "@/lib/labels"
 import { apiFetch } from "@/lib/api"
@@ -83,7 +84,13 @@ export default async function HistoryPage({
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Verlauf"
-        description="Jede Änderung mit Akteur, Zeit, vorher und nachher. Max im Browser, Agents per CLI."
+        description={
+          <ScopedDescription project={null}>
+            Jede Änderung mit Akteur, Zeit, vorher und nachher. Max im Browser,
+            Agents per CLI. Der Verlauf zeigt immer alle Projekte, die
+            Projektauswahl gilt hier nicht.
+          </ScopedDescription>
+        }
         actions={
           <Suspense>
             <UrlSelect
