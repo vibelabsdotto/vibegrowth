@@ -12,4 +12,6 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 - Kein DB-Zugriff, kein Import aus `apps/api`. Server Components lesen über die API (`VIBEGROWTH_API_URL`, Default `http://127.0.0.1:4311`), Server Actions schreiben mit `X-Actor: max` und geben `{ok,data}|{ok:false,error}` zurück.
 - `proxy.ts` lehnt fremde Hosts ab. Bindet nur an `127.0.0.1`.
+- Port 4310 gehört der Produktion (Launcher, `next start` aus diesem Ordner). `npm run dev` belegt ebenfalls 4310; zum Entwickeln `VIBEGROWTH_API_URL=<dev-api> npx next dev --hostname 127.0.0.1 --port 4320`. `next build` ersetzt den Produktions-Build, live nach `vibegrowth restart`.
+- Growth-Schreibvorgänge stehen in `app/growth-actions.ts`, Shorts in `app/actions.ts`. Body-Feldnamen je Modul wie in `docs/CONTRACT.md` §4.1 (`project` bzw. `projectId`).
 - UI: shadcn-Komponenten zuerst (`npx shadcn@latest add <name>` in `apps/web`), Overlays als Drawer von rechts, Toasts über `toast.add`, Charts über `components/ui/chart.tsx` (Recharts) ohne Animation.
