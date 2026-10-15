@@ -277,7 +277,7 @@ Override: Liste (oder `{stages:[…]}`) von `{key, label?, sources?, agg?}` mit 
 | `backlog [list] [--project] [--status]\|add\|update <id>` | `GET /backlog?project=&status=&kind=`, `GET /backlog/:id` (ohne CLI-Befehl), `POST /backlog`, `PATCH /backlog/:id` |
 | `exp [list]\|show <id>\|add …\|update <id>\|eval [--project]` | `GET /experiments?project=&status=`, `GET /experiments/:id` (mit Tagesreihe der Metrik und `changes` im Zeitraum), `POST /experiments`, `PATCH /experiments/:id`, `POST /experiments/evaluate {project?}` |
 | `changes [list] [--project] [--from] [--to] [--kind]\|add --project --kind --summary [--ref] [--exp] [--channel] [--date]` | `GET /changes?project=&from=&to=&kind=&experiment=&limit=`, `POST /changes` |
-| `geo questions [--project]\|geo question add --project --text\|geo question update <id> [--text] [--active\|--inactive]` | `GET /geo/questions?project=&all=` (ohne `all` nur aktive), `POST /geo/questions`, `PATCH /geo/questions/:id` |
+| `geo questions [--project] [--active\|--inactive\|--all]\|geo question add --project --text\|geo question update <id> [--text] [--active\|--inactive]` | `GET /geo/questions?project=&all=` (ohne `all` nur aktive), `POST /geo/questions`, `PATCH /geo/questions/:id` |
 | `geo record --file <json\|->` | `POST /geo/checks {checks:[…]}` (höchstens 1000; Upsert, aktualisiert `mention_targets`) |
 | `geo list --project [--date] [--engine]\|geo summary --project` | `GET /geo/checks?project=&date=&engine=&question=&limit=`, `GET /geo/summary?project=` (pro Lauf: Nennungsquote, Ø-Position, zitiert-Quote; Top-Konkurrenten; Quellen-Domains gruppiert) |
 | `geo run --project [--engine chatgpt-web] [--limit <n>]` | `POST /geo/run {project, engine?, limit?}` → Antwort wie `/collect`. Läuft `geo-chatgpt` auch, wenn ausgeschaltet; `engine` nur `chatgpt-web`; `limit` = nur die ersten N Fragen. CLI-Timeout 60 min, Exit 2 bei Fehler |
@@ -288,7 +288,7 @@ Override: Liste (oder `{stages:[…]}`) von `{key, label?, sources?, agg?}` mit 
 
 `[list]`, `[show]`, `[summary]`: Standard-Unterbefehl, darf fehlen (`vibegrowth projects --json` = `projects list`).
 
-Bekannte Abweichung: `geo questions --active|--inactive` schickt `active=true|false`, die API wertet nur `all` aus. Beide Flags liefern deshalb die aktiven Fragen.
+`geo questions --inactive` und `--all` holen mit `all=1` alle Fragen; `--inactive` filtert in der CLI auf inaktive.
 
 Externe Aktionen (`sitemap-submit`, `bing-submit`, `collectors setup app`) laufen ohne Transaktion und protokollieren jede externe Änderung danach als einen `changes`-Eintrag über `ChangesService`.
 

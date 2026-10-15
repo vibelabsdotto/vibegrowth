@@ -886,14 +886,24 @@ export function registerGrowth(program: Command) {
   geoCmd
     .command("questions")
     .option("--project <id>")
-    .option("--active", "nur aktive")
+    .option("--active", "nur aktive (Standard)")
     .option("--inactive", "nur inaktive")
+    .option("--all", "aktive und inaktive")
     .action(
-      run((o: { project?: string; active?: boolean; inactive?: boolean }) =>
-        api.get("/geo/questions", {
-          project: o.project,
-          active: o.active ? "true" : o.inactive ? "false" : undefined,
-        })
+      run(
+        async (o: {
+          project?: string
+          active?: boolean
+          inactive?: boolean
+          all?: boolean
+        }) => {
+          // The API knows only all=1; inactive ones are filtered here.
+          const rows = (await api.get("/geo/questions", {
+            project: o.project,
+            all: o.all || o.inactive ? "1" : undefined,
+          })) as { active?: boolean }[]
+          return o.inactive ? rows.filter((q) => !q.active) : rows
+        }
       )
     )
   const questionCmd = geoCmd.command("question").description("Frage pflegen")
