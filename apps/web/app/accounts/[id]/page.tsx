@@ -1,18 +1,4 @@
 import Link from "next/link"
-import { notFound } from "next/navigation"
-import {
-  getAccount,
-  getCharacter,
-  listCharacters,
-  listFormats,
-  listRules,
-} from "@/core/catalog"
-import { activeFormat, CTA_MEANING } from "@/core/context"
-import { listDecisions, listLearnings } from "@/core/knowledge"
-import { accountStats } from "@/core/metrics"
-import { horizon, nextEntry } from "@/core/plan"
-import { listPosts, unregisteredPostDirs } from "@/core/posts"
-import { VSError } from "@/core/util"
 import { OpenFolderButton } from "@/components/open-folder-button"
 import { PageHeader } from "@/components/page-header"
 import { RulesCard } from "@/components/rules-card"
@@ -34,16 +20,27 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { localToday } from "@/lib/dates"
+import { apiFetch, mediaUrl } from "@/lib/api"
 import {
   ACCOUNT_STATUS_LABEL,
   actorLabel,
   CTA_LABEL,
+  CTA_MEANING,
   fmtDate,
   fmtNum,
   fmtPct,
   PLAN_STATUS_LABEL,
 } from "@/lib/labels"
-import { ctx, mediaUrl } from "@/lib/server"
+import { orNotFound } from "@/lib/server"
+import type {
+  AccountShow,
+  CharacterRow,
+  DayEntries,
+  DecisionRow,
+  FormatRow,
+  Horizon,
+  PostRow,
+} from "@/lib/types"
 import { EditAccount, EditCharacter } from "./edit"
 
 export const dynamic = "force-dynamic"
@@ -55,7 +52,11 @@ export async function generateMetadata({
 }) {
   const { id } = await params
   try {
-    return { title: getAccount(ctx(), id).name }
+    return {
+      title: (
+        await apiFetch<AccountShow>(`/accounts/${encodeURIComponent(id)}`)
+      ).name,
+    }
   } catch {
     return { title: "Account" }
   }
@@ -67,33 +68,28 @@ export default async function AccountPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const c = ctx()
-  let account
-  try {
-    account = getAccount(c, id)
-  } catch (e) {
-    if (e instanceof VSError && e.code === "NOT_FOUND") notFound()
-    throw e
-  }
-  const character = account.characterId
-    ? getCharacter(c, account.characterId)
-    : null
-  const formats = listFormats(c)
+  const show = await orNotFound(
+    apiFetch<AccountShow>(`/accounts/${encodeURIComponent(id)}`)
+  )
+  const {
+    activeFormat: active,
+    character,
+    rules,
+    learnings,
+    stats,
+    unregisteredPostDirs: unregistered,
+    ...account
+  } = show
   const today = localToday()
-  const active = activeFormat(c, id, today)
+  const [formats, characters, decisions, posts, h, day] = await Promise.all([
+    apiFetch<FormatRow[]>("/formats"),
+    apiFetch<CharacterRow[]>("/characters"),
+    apiFetch<DecisionRow[]>("/decisions", { query: { account: id } }),
+    apiFetch<PostRow[]>("/posts", { query: { account: id } }),
+    apiFetch<Horizon>("/plan/horizon", { query: { account: id, days: 21 } }),
+    apiFetch<DayEntries>("/plan/next", { query: { account: id, date: today } }),
+  ])
   const accountFormat = formats.find((f) => f.id === account.defaultFormatId)
-  const rules = listRules(c, {
-    scopeType: "account",
-    scopeId: id,
-    status: "active",
-  })
-  const learnings = listLearnings(c, { accountId: id, status: "active" })
-  const decisions = listDecisions(c, { accountId: id })
-  const stats = accountStats(c, id)
-  const posts = listPosts(c, { accountId: id })
-  const h = horizon(c, id, today, 21)
-  const day = nextEntry(c, id, today)
-  const unregistered = unregisteredPostDirs(c, id)
   const statsByPost = new Map(
     stats.posts.filter((p) => p.postId).map((p) => [p.postId!, p])
   )
@@ -120,7 +116,7 @@ export default async function AccountPage({
             <EditAccount
               account={account}
               formats={formats.map((f) => ({ value: f.id, label: f.name }))}
-              characters={listCharacters(c).map((ch) => ({
+              characters={characters.map((ch) => ({
                 value: ch.id,
                 label: ch.name,
               }))}
@@ -135,17 +131,17 @@ export default async function AccountPage({
           ["CTA-Regel", CTA_LABEL[account.ctaRule] ?? account.ctaRule],
           [
             "Aktives Format",
-            active.format ? (
+            active ? (
               <Link
-                href={`/formats/${active.format.id}`}
+                href={`/formats/${active.id}`}
                 className="underline-offset-4 hover:underline"
               >
-                {active.format.name} · Version {active.format.currentVersion}
+                {active.name} · Version {active.version}
               </Link>
             ) : (
               "–"
             ),
-            active.source === "plan"
+            active?.source === "plan"
               ? `Heute aus dem Planeintrag. Account: ${accountFormat?.name ?? "keins"}`
               : null,
           ],

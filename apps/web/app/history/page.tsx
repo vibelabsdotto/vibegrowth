@@ -1,5 +1,4 @@
 import { Suspense } from "react"
-import { listHistory } from "@/core/knowledge"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -12,7 +11,8 @@ import {
 } from "@/components/ui/table"
 import { UrlSelect } from "@/components/url-select"
 import { actorLabel, fmtDateTime } from "@/lib/labels"
-import { ctx } from "@/lib/server"
+import { apiFetch } from "@/lib/api"
+import type { HistoryRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Verlauf" }
@@ -64,17 +64,20 @@ export default async function HistoryPage({
   searchParams: Promise<{ entity?: string; by?: string }>
 }) {
   const sp = await searchParams
-  const c = ctx()
-  const rows = listHistory(c, {
-    entity: sp.entity || undefined,
-    actor: sp.by || undefined,
-    limit: 300,
-  })
-  const actors = (
-    c.sqlite
-      .prepare("SELECT DISTINCT actor FROM history ORDER BY actor")
-      .all() as { actor: string }[]
-  ).map((r) => r.actor)
+  const [rows, recent] = await Promise.all([
+    apiFetch<HistoryRow[]>("/history", {
+      query: {
+        entity: sp.entity || undefined,
+        by: sp.by || undefined,
+        limit: 300,
+      },
+    }),
+    // No endpoint for distinct actors: take them from the latest 1000 entries.
+    apiFetch<HistoryRow[]>("/history", { query: { limit: 1000 } }),
+  ])
+  const actors = [
+    ...new Set([...recent.map((r) => r.actor), ...(sp.by ? [sp.by] : [])]),
+  ].sort()
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">

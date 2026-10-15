@@ -94,3 +94,11 @@ export function plusMonths(d: string, n: number) {
   dt.setUTCMonth(dt.getUTCMonth() + n)
   return iso(dt)
 }
+
+export function isDate(s: unknown): s is string {
+  return (
+    typeof s === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(s) &&
+    !Number.isNaN(Date.parse(s))
+  )
+}

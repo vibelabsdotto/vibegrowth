@@ -1,8 +1,4 @@
 import Link from "next/link"
-import { notFound } from "next/navigation"
-import { getFormat, listImageErrors, listRules } from "@/core/catalog"
-import { accountsUsingFormat } from "@/core/context"
-import { VSError } from "@/core/util"
 import { Markdown } from "@/components/markdown"
 import { PageHeader } from "@/components/page-header"
 import { RulesCard } from "@/components/rules-card"
@@ -14,9 +10,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { localToday } from "@/lib/dates"
+import { apiFetch } from "@/lib/api"
 import { actorLabel, fmtDateTime, GUIDE_LABEL } from "@/lib/labels"
-import { ctx } from "@/lib/server"
+import { orNotFound } from "@/lib/server"
+import type { FormatShow, RuleRow } from "@/lib/types"
 import { CorrectFormat, ImageErrorsCard, NewVersion } from "./format-actions"
 
 export const dynamic = "force-dynamic"
@@ -27,23 +24,13 @@ export default async function FormatPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const c = ctx()
-  let f
-  try {
-    f = getFormat(c, id)
-  } catch (e) {
-    if (e instanceof VSError && e.code === "NOT_FOUND") notFound()
-    throw e
-  }
-  const rules = listRules(c, {
-    scopeType: "format",
-    scopeId: id,
-    status: "active",
-    formatVersion: f.currentVersion,
-  })
-  const allRules = listRules(c, { scopeType: "format", scopeId: id })
-  const errors = listImageErrors(c, { formatId: id })
-  const users = accountsUsingFormat(c, id, localToday())
+  const [f, allRules] = await Promise.all([
+    orNotFound(apiFetch<FormatShow>(`/formats/${encodeURIComponent(id)}`)),
+    apiFetch<RuleRow[]>("/rules", { query: { format: id, all: true } }),
+  ])
+  const rules = f.rules.filter((r) => r.status === "active")
+  const errors = f.imageErrors
+  const users = f.activeAccounts
   const cur = f.current
   const values = {
     description: cur?.description ?? f.description ?? "",

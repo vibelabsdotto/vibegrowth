@@ -1,5 +1,3 @@
-import { listAccounts, listBrands } from "@/core/catalog"
-import { listDecisions } from "@/core/knowledge"
 import { NewDecision } from "@/components/knowledge-forms"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -10,16 +8,19 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { actorLabel, fmtDate } from "@/lib/labels"
-import { ctx } from "@/lib/server"
+import { apiFetch } from "@/lib/api"
+import { listBrands } from "@/lib/server"
+import type { AccountRow, DecisionRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Entscheidungen" }
 
-export default function DecisionsPage() {
-  const c = ctx()
-  const accounts = listAccounts(c)
-  const brands = listBrands(c)
-  const items = listDecisions(c)
+export default async function DecisionsPage() {
+  const [accounts, brands, items] = await Promise.all([
+    apiFetch<AccountRow[]>("/accounts"),
+    listBrands(),
+    apiFetch<DecisionRow[]>("/decisions"),
+  ])
   const byId = new Map(items.map((d) => [d.id, d]))
   const scopeName = (t: string, id: string | null) =>
     t === "global"

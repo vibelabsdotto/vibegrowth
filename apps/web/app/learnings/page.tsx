@@ -1,6 +1,4 @@
 import { Suspense } from "react"
-import { listAccounts, listBrands } from "@/core/catalog"
-import { listLearnings } from "@/core/knowledge"
 import { LearningStatusButton, NewLearning } from "@/components/knowledge-forms"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -13,7 +11,9 @@ import {
 } from "@/components/ui/empty"
 import { UrlSelect } from "@/components/url-select"
 import { actorLabel, fmtDate } from "@/lib/labels"
-import { ctx } from "@/lib/server"
+import { apiFetch } from "@/lib/api"
+import { listBrands } from "@/lib/server"
+import type { AccountRow, LearningRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Learnings" }
@@ -24,9 +24,10 @@ export default async function LearningsPage({
   searchParams: Promise<{ account?: string; status?: string }>
 }) {
   const sp = await searchParams
-  const c = ctx()
-  const accounts = listAccounts(c)
-  const brands = listBrands(c)
+  const [accounts, brands] = await Promise.all([
+    apiFetch<AccountRow[]>("/accounts"),
+    listBrands(),
+  ])
   const scopeName = (t: string, id: string | null) =>
     t === "global"
       ? "alle"
@@ -41,7 +42,12 @@ export default async function LearningsPage({
       : sp.status === "outdated"
         ? "outdated"
         : "active"
-  const items = listLearnings(c, { accountId: sp.account || undefined, status })
+  // GET /learnings knows active or all; "outdated" is filtered here.
+  const items = (
+    await apiFetch<LearningRow[]>("/learnings", {
+      query: { account: sp.account || undefined, all: status !== "active" },
+    })
+  ).filter((l) => !status || l.status === status)
   const accOpts = accounts.map((a) => ({ value: a.id, label: a.name }))
 
   return (

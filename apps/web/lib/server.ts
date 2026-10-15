@@ -1,14 +1,22 @@
 import "server-only"
-import { getCtx } from "@/core/db"
+import { notFound } from "next/navigation"
+import { ApiError, apiFetch } from "@/lib/api"
+import type { ProjectRow } from "@/lib/types"
 
-/** Shared server-side context for pages and actions. Same database the CLI writes to. */
-export function ctx() {
-  return getCtx()
+/** Rethrow everything except a 404 from the API, which becomes the Next not-found page. */
+export async function orNotFound<T>(p: Promise<T>): Promise<T> {
+  try {
+    return await p
+  } catch (e) {
+    if (e instanceof ApiError && e.code === "NOT_FOUND") notFound()
+    throw e
+  }
 }
 
-/** The web app is Max's surface; every write from the browser is attributed to him. */
-export const WEB_ACTOR = "max"
-
-export function mediaUrl(rel: string | null | undefined) {
-  return rel ? `/media?path=${encodeURIComponent(rel)}` : null
+/** Projects (brands in the shorts module), sorted by name like listBrands. */
+export async function listBrands() {
+  const rows = await apiFetch<ProjectRow[]>("/projects")
+  return [...rows].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+  )
 }

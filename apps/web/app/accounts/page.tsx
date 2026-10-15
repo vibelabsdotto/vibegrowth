@@ -1,14 +1,4 @@
 import Link from "next/link"
-import {
-  listAccounts,
-  listBrands,
-  listCharacters,
-  listFormats,
-} from "@/core/catalog"
-import { activeFormat } from "@/core/context"
-import { accountStats } from "@/core/metrics"
-import { horizon } from "@/core/plan"
-import { listPosts } from "@/core/posts"
 import { PageHeader } from "@/components/page-header"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -19,21 +9,47 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { localToday } from "@/lib/dates"
+import { apiFetch, mediaUrl } from "@/lib/api"
 import { ACCOUNT_STATUS_LABEL, CTA_LABEL, fmtNum } from "@/lib/labels"
-import { ctx, mediaUrl } from "@/lib/server"
+import { listBrands } from "@/lib/server"
+import type {
+  AccountRow,
+  AccountShow,
+  CharacterRow,
+  FormatRow,
+  Horizon,
+  PostRow,
+} from "@/lib/types"
 import { NewAccount } from "./new-account"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Accounts" }
 
-export default function AccountsPage() {
-  const c = ctx()
-  const brands = listBrands(c)
-  const formats = listFormats(c)
-  const characters = listCharacters(c)
-  const accounts = listAccounts(c)
-  const today = localToday()
+export default async function AccountsPage() {
+  const [brands, formats, characters, accounts, posts] = await Promise.all([
+    listBrands(),
+    apiFetch<FormatRow[]>("/formats"),
+    apiFetch<CharacterRow[]>("/characters"),
+    apiFetch<AccountRow[]>("/accounts"),
+    apiFetch<PostRow[]>("/posts"),
+  ])
+  // Per account: show (active format, stats) and the 3-week horizon.
+  const detail = new Map(
+    await Promise.all(
+      accounts.map(
+        async (a) =>
+          [
+            a.id,
+            await Promise.all([
+              apiFetch<AccountShow>(`/accounts/${encodeURIComponent(a.id)}`),
+              apiFetch<Horizon>("/plan/horizon", {
+                query: { account: a.id, days: 21 },
+              }),
+            ]),
+          ] as const
+      )
+    )
+  )
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
@@ -61,10 +77,12 @@ export default function AccountsPage() {
               .filter((a) => a.brandId === b.id)
               .map((a) => {
                 const ch = characters.find((x) => x.id === a.characterId)
-                const stats = accountStats(c, a.id)
-                const h = horizon(c, a.id, today, 21)
-                const active = activeFormat(c, a.id, today)
-                const postCount = listPosts(c, { accountId: a.id }).length
+                const [show, h] = detail.get(a.id)!
+                const stats = show.stats
+                const active = show.activeFormat
+                const postCount = posts.filter(
+                  (p) => p.accountId === a.id
+                ).length
                 return (
                   <Link
                     key={a.id}
@@ -135,8 +153,8 @@ export default function AccountsPage() {
                         </dl>
                         <p className="truncate text-xs text-muted-foreground">
                           Aktives Format:{" "}
-                          {active.format
-                            ? `${active.format.name} · v${active.format.currentVersion}${active.source === "plan" ? " (heute laut Plan)" : ""}`
+                          {active
+                            ? `${active.name} · v${active.version}${active.source === "plan" ? " (heute laut Plan)" : ""}`
                             : "–"}
                         </p>
                       </CardContent>

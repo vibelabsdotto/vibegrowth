@@ -1,12 +1,4 @@
 import Link from "next/link"
-import {
-  getFormat,
-  listBrands,
-  listFormats,
-  listImageErrors,
-  listRules,
-} from "@/core/catalog"
-import { accountsUsingFormat } from "@/core/context"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -16,18 +8,29 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { localToday } from "@/lib/dates"
-import { ctx } from "@/lib/server"
+import { apiFetch } from "@/lib/api"
+import { listBrands } from "@/lib/server"
+import type { FormatRow, FormatShow } from "@/lib/types"
 import { NewFormat } from "./new-format"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Formate" }
 
-export default function FormatsPage() {
-  const c = ctx()
-  const formats = listFormats(c)
-  const today = localToday()
-  const brands = listBrands(c)
+export default async function FormatsPage() {
+  const [formats, brands] = await Promise.all([
+    apiFetch<FormatRow[]>("/formats"),
+    listBrands(),
+  ])
+  // formats show: current version, active accounts, rules of the current version, image errors.
+  const shows = new Map(
+    (
+      await Promise.all(
+        formats.map((f) =>
+          apiFetch<FormatShow>(`/formats/${encodeURIComponent(f.id)}`)
+        )
+      )
+    ).map((s) => [s.id, s])
+  )
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
@@ -42,18 +45,10 @@ export default function FormatsPage() {
       />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {formats.map((f) => {
-          const full = getFormat(c, f.id)
-          const rules = listRules(c, {
-            scopeType: "format",
-            scopeId: f.id,
-            status: "active",
-            formatVersion: f.currentVersion,
-          })
-          const errors = listImageErrors(c, {
-            formatId: f.id,
-            status: "active",
-          })
-          const users = accountsUsingFormat(c, f.id, today)
+          const full = shows.get(f.id)!
+          const rules = full.rules.filter((r) => r.status === "active")
+          const errors = full.imageErrors.filter((e) => e.status === "active")
+          const users = full.activeAccounts
           return (
             <Link
               key={f.id}

@@ -32,6 +32,14 @@ export const CTA_LABEL: Record<string, string> = {
   app: "App-CTA",
 }
 
+/** What the CTA rule means for a post, same wording as the agent context. */
+export const CTA_MEANING: Record<string, string> = {
+  none: "Kein CTA und keine Engagement-Zeile.",
+  engagement:
+    'Kein App-CTA: kein App-Name, kein Download- oder Link-in-Bio-Hinweis. Engagement gehört rein (Fragen an die Zuschauer, "send this to", "save this", "follow for more").',
+  app: "App-CTA erlaubt. Engagement-Zeilen ebenfalls.",
+}
+
 export const RULE_KIND_LABEL: Record<string, string> = {
   hook: "Hook",
   copy: "Copy",

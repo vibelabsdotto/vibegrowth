@@ -1,7 +1,5 @@
 import { ExternalLink } from "lucide-react"
 import { Suspense } from "react"
-import { listAccounts } from "@/core/catalog"
-import { listInspirations } from "@/core/knowledge"
 import { EditInspiration, NewInspiration } from "@/components/knowledge-forms"
 import { OpenFolderButton } from "@/components/open-folder-button"
 import { PageHeader } from "@/components/page-header"
@@ -22,7 +20,8 @@ import {
   INSPO_TYPE_LABEL,
   options,
 } from "@/lib/labels"
-import { ctx, mediaUrl } from "@/lib/server"
+import { apiFetch, mediaUrl } from "@/lib/api"
+import type { AccountRow, InspirationRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Inspiration" }
@@ -33,14 +32,17 @@ export default async function InspirationPage({
   searchParams: Promise<{ account?: string; status?: string; type?: string }>
 }) {
   const sp = await searchParams
-  const c = ctx()
-  const accounts = listAccounts(c)
+  const [accounts, items] = await Promise.all([
+    apiFetch<AccountRow[]>("/accounts"),
+    apiFetch<InspirationRow[]>("/inspo", {
+      query: {
+        account: sp.account || undefined,
+        status: sp.status || undefined,
+        type: sp.type || undefined,
+      },
+    }),
+  ])
   const accOpts = accounts.map((a) => ({ value: a.id, label: a.name }))
-  const items = listInspirations(c, {
-    accountId: sp.account || undefined,
-    status: sp.status || undefined,
-    type: sp.type || undefined,
-  })
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
@@ -148,7 +150,7 @@ export default async function InspirationPage({
                         <span key={e.id}>
                           {n ? ", " : ""}
                           <Link
-                            href={`/?date=${e.date ?? ""}`}
+                            href={`/calendar?date=${e.date ?? ""}`}
                             className="underline-offset-4 hover:underline"
                           >
                             {fmtDate(e.date)} {e.topic}

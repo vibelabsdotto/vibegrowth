@@ -1,6 +1,3 @@
-import { listAccounts } from "@/core/catalog"
-import { listHooks } from "@/core/knowledge"
-import { listPosts } from "@/core/posts"
 import { HookActions, NewHook } from "@/components/knowledge-forms"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -21,15 +18,18 @@ import {
 } from "@/components/ui/table"
 import Link from "next/link"
 import { fmtDate } from "@/lib/labels"
-import { ctx } from "@/lib/server"
+import { apiFetch } from "@/lib/api"
+import type { AccountRow, HookRow, PostRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Hooks" }
 
-export default function HooksPage() {
-  const c = ctx()
-  const accounts = listAccounts(c)
-  const hooks = listHooks(c)
+export default async function HooksPage() {
+  const [accounts, hooks, allPosts] = await Promise.all([
+    apiFetch<AccountRow[]>("/accounts"),
+    apiFetch<HookRow[]>("/hooks"),
+    apiFetch<PostRow[]>("/posts"),
+  ])
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
@@ -93,7 +93,7 @@ export default function HooksPage() {
       </Card>
 
       {accounts.map((a) => {
-        const posts = listPosts(c, { accountId: a.id }).filter((p) => p.hook)
+        const posts = allPosts.filter((p) => p.accountId === a.id && p.hook)
         if (!posts.length) return null
         return (
           <Card key={a.id}>

@@ -1,7 +1,4 @@
 import Link from "next/link"
-import { listAccounts } from "@/core/catalog"
-import { accountStats } from "@/core/metrics"
-import { listPosts } from "@/core/posts"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -25,7 +22,8 @@ import {
   options,
   POST_STATUS_LABEL,
 } from "@/lib/labels"
-import { ctx, mediaUrl } from "@/lib/server"
+import { apiFetch, mediaUrl } from "@/lib/api"
+import type { AccountRow, AccountStats, PostRow } from "@/lib/types"
 import { UrlSelect } from "@/components/url-select"
 import { Suspense } from "react"
 
@@ -38,18 +36,24 @@ export default async function PostsPage({
   searchParams: Promise<{ account?: string; status?: string }>
 }) {
   const sp = await searchParams
-  const c = ctx()
-  const accounts = listAccounts(c)
+  const [accounts, posts] = await Promise.all([
+    apiFetch<AccountRow[]>("/accounts"),
+    apiFetch<PostRow[]>("/posts", {
+      query: {
+        account: sp.account || undefined,
+        status: sp.status || undefined,
+      },
+    }),
+  ])
   const name = Object.fromEntries(accounts.map((a) => [a.id, a.name]))
-  const posts = listPosts(c, {
-    accountId: sp.account || undefined,
-    status: sp.status || undefined,
-  })
+  const allStats = await Promise.all(
+    accounts.map((a) =>
+      apiFetch<AccountStats>("/metrics", { query: { account: a.id } })
+    )
+  )
   const stats = new Map(
-    accounts.flatMap((a) =>
-      accountStats(c, a.id)
-        .posts.filter((p) => p.postId)
-        .map((p) => [p.postId!, p] as const)
+    allStats.flatMap((st) =>
+      st.posts.filter((p) => p.postId).map((p) => [p.postId!, p] as const)
     )
   )
 

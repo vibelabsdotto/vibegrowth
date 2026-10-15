@@ -1,11 +1,5 @@
 import { ExternalLink } from "lucide-react"
 import Link from "next/link"
-import { notFound } from "next/navigation"
-import { getAccount } from "@/core/catalog"
-import { postStats } from "@/core/metrics"
-import { getEntry } from "@/core/plan"
-import { getPost } from "@/core/posts"
-import { VSError } from "@/core/util"
 import { CopyButton } from "@/components/copy-button"
 import { OpenFolderButton } from "@/components/open-folder-button"
 import { PageHeader } from "@/components/page-header"
@@ -35,21 +29,14 @@ import {
   PLAN_STATUS_LABEL,
   POST_STATUS_LABEL,
 } from "@/lib/labels"
-import { ctx, mediaUrl } from "@/lib/server"
+import { apiFetch, mediaUrl } from "@/lib/api"
+import { orNotFound } from "@/lib/server"
+import type { AccountRow, PostShow } from "@/lib/types"
 import { PostActions } from "./post-actions"
 
 export const dynamic = "force-dynamic"
 
-function load(id: string) {
-  try {
-    const c = ctx()
-    const post = getPost(c, id)
-    return { c, post }
-  } catch (e) {
-    if (e instanceof VSError && e.code === "NOT_FOUND") notFound()
-    throw e
-  }
-}
+const postPath = (id: string) => `/posts/${encodeURIComponent(id)}`
 
 export async function generateMetadata({
   params,
@@ -58,7 +45,7 @@ export async function generateMetadata({
 }) {
   const { id } = await params
   try {
-    return { title: getPost(ctx(), id).slug }
+    return { title: (await apiFetch<PostShow>(postPath(id))).slug }
   } catch {
     return { title: "Post" }
   }
@@ -70,11 +57,17 @@ export default async function PostPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { c, post } = load(id)
-  const account = getAccount(c, post.accountId)
-  const m = postStats(c, post.id)
+  const {
+    metrics: m,
+    planEntry: entry,
+    ...post
+  } = await orNotFound(apiFetch<PostShow>(postPath(id)))
+  const accounts = await apiFetch<AccountRow[]>("/accounts")
+  const account = accounts.find((a) => a.id === post.accountId) ?? {
+    id: post.accountId,
+    name: post.accountId,
+  }
   const s = m.stats
-  const entry = post.planEntryId ? getEntry(c, post.planEntryId) : null
   const video = mediaUrl(post.mp4)
 
   return (
@@ -284,7 +277,7 @@ export default async function PostPage({
               ) : null}
               <Link
                 className="text-sm underline underline-offset-4"
-                href={`/?date=${entry.date ?? ""}`}
+                href={`/calendar?date=${entry.date ?? ""}`}
               >
                 Im Kalender zeigen
               </Link>
