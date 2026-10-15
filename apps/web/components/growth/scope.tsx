@@ -1,6 +1,5 @@
 import type { ComponentProps, ReactNode } from "react"
-import { FolderKanban, Layers3 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { ScopeBadge } from "@/components/scope-badge"
 
 /**
  * Names the project scope a page shows (switcher at the top of the sidebar), so filtered
@@ -16,14 +15,9 @@ export function ScopeLabel({
   name: string
   children?: ReactNode
 }) {
-  const Icon = project ? FolderKanban : Layers3
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <Badge variant={project ? "secondary" : "outline"}>
-        <Icon aria-hidden="true" />
-        <span className="sr-only">Projekt: </span>
-        {name}
-      </Badge>
+      <ScopeBadge project={project ? { id: project, name } : null} />
       {children ? <span>{children}</span> : null}
     </span>
   )

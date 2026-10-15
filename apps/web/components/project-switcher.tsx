@@ -80,13 +80,13 @@ export function ProjectSwitcher({
             value={current || ALL}
             onValueChange={(v: string) => choose(v)}
           >
-            <DropdownMenuRadioItem value={ALL}>
+            <DropdownMenuRadioItem value={ALL} closeOnClick>
               <Layers3 aria-hidden="true" />
               Alle Projekte
             </DropdownMenuRadioItem>
             {projects.length ? <DropdownMenuSeparator /> : null}
             {projects.map((p) => (
-              <DropdownMenuRadioItem key={p.id} value={p.id}>
+              <DropdownMenuRadioItem key={p.id} value={p.id} closeOnClick>
                 <span
                   aria-hidden="true"
                   className="flex size-4 items-center justify-center rounded-sm border text-[10px] font-medium uppercase"
