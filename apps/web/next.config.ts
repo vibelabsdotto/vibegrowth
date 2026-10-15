@@ -8,7 +8,16 @@ const nextConfig: NextConfig = {
     path.dirname(fileURLToPath(import.meta.url)),
     "../.."
   ),
-  serverExternalPackages: ["better-sqlite3"],
+  // Browser requests for data and media go to apps/api (contract §4).
+  async rewrites() {
+    const api = (
+      process.env.VIBEGROWTH_API_URL ?? "http://127.0.0.1:4311"
+    ).replace(/\/$/, "")
+    return [
+      { source: "/api/:path*", destination: `${api}/api/:path*` },
+      { source: "/media", destination: `${api}/api/media` },
+    ]
+  },
 }
 
 export default nextConfig
