@@ -10,6 +10,7 @@ import {
 import { Toaster } from "@/components/ui/toast"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { apiUrl, WEB_ACTOR } from "@/lib/api"
+import { selectedProject } from "@/lib/project-scope"
 import { cn } from "@/lib/utils"
 import "./globals.css"
 import "@/components/growth/growth.css"
@@ -47,8 +48,11 @@ async function navData() {
         .filter((p) => p.status !== "archived")
         .map((p) => ({ id: p.id, name: p.name }))
     : []
+  const chosen = await selectedProject()
   return {
     projects: list,
+    // A deleted or archived project falls back to "alle".
+    selected: list.some((p) => p.id === chosen) ? chosen : "",
     pendingApprovals: Array.isArray(pending) ? pending.length : 0,
     apiDown: projects === null,
   }

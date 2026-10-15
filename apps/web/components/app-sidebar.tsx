@@ -19,10 +19,10 @@ import {
   Quote,
   Sparkles,
   Store,
-  TrendingUp,
   Users,
   type LucideIcon,
 } from "lucide-react"
+import { ProjectSwitcher } from "@/components/project-switcher"
 import { ThemeToggle } from "@/components/theme-toggle"
 import {
   Sidebar,
@@ -68,10 +68,13 @@ const knowledge: NavItem[] = [
 
 export function AppSidebar({
   projects = [],
+  selected = "",
   pendingApprovals = 0,
   apiDown = false,
 }: {
   projects?: SidebarProject[]
+  /** Project from the switcher, "" = alle */
+  selected?: string
   pendingApprovals?: number
   apiDown?: boolean
 }) {
@@ -85,6 +88,15 @@ export function AppSidebar({
 
   const growth: NavItem[] = [
     { href: "/", label: "Übersicht", icon: LayoutDashboard },
+    ...(selected
+      ? [
+          {
+            href: `/projects/${encodeURIComponent(selected)}`,
+            label: "Cockpit",
+            icon: FolderKanban,
+          },
+        ]
+      : []),
     {
       href: "/approvals",
       label: "Wartet auf Max",
@@ -97,12 +109,6 @@ export function AppSidebar({
     { href: "/geo", label: "GEO", icon: Sparkles },
     { href: "/store", label: "Store", icon: Store },
   ]
-
-  const projectItems: NavItem[] = projects.map((p) => ({
-    href: `/projects/${encodeURIComponent(p.id)}`,
-    label: p.name,
-    icon: FolderKanban,
-  }))
 
   const group = (label: string, items: NavItem[], empty?: string) => (
     <SidebarGroup>
@@ -160,10 +166,7 @@ export function AppSidebar({
         {!collapsed && (
           <SidebarMenu className="min-w-0 flex-1">
             <SidebarMenuItem>
-              <SidebarMenuButton render={<Link href="/" prefetch={false} />}>
-                <TrendingUp aria-hidden="true" />
-                <span className="font-semibold">VibeGrowth</span>
-              </SidebarMenuButton>
+              <ProjectSwitcher projects={projects} selected={selected} />
             </SidebarMenuItem>
           </SidebarMenu>
         )}
@@ -172,11 +175,6 @@ export function AppSidebar({
       <SidebarContent>
         <nav aria-label="Hauptnavigation">
           {group("Growth", growth)}
-          {group(
-            "Projekte",
-            projectItems,
-            apiDown ? "API nicht erreichbar" : "Keine Projekte"
-          )}
           {group("Shortform", shortform)}
           {group("Wissen", knowledge)}
         </nav>
@@ -190,7 +188,7 @@ export function AppSidebar({
         >
           {!collapsed && (
             <span className="text-xs text-muted-foreground">
-              Lokal · 127.0.0.1
+              {apiDown ? "API nicht erreichbar" : "Lokal · 127.0.0.1"}
             </span>
           )}
           <ThemeToggle />
