@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm"
 import {
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -12,19 +13,33 @@ const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
 const createdAt = () => text("created_at").notNull().default(now)
 const updatedAt = () => text("updated_at").notNull().default(now)
 
-export const brands = sqliteTable("brands", {
+/** Project = brand/product (Chrono, Amelie, …). Was the table brands; the shorts module keeps calling it brand/brandId. */
+export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   notionUrl: text("notion_url"),
   notes: text("notes"),
+  url: text("url"),
+  /** app | website | tool | other */
+  kind: text("kind").notNull().default("app"),
+  /** active | paused | archived */
+  status: text("status").notNull().default("active"),
+  language: text("language"),
+  repo: text("repo"),
+  workspace: text("workspace"),
+  /** JSON object, optional funnel override */
+  config: text("config").notNull().default("{}"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 })
 
+/** Old name, kept so the shorts code keeps compiling. Same table. */
+export const brands = projects
+
 export const characters = sqliteTable("characters", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  brandId: text("brand_id").references(() => brands.id),
+  brandId: text("brand_id").references(() => projects.id),
   persona: text("persona"),
   voice: text("voice"),
   look: text("look"),
@@ -41,7 +56,7 @@ export const formats = sqliteTable("formats", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
-  brandId: text("brand_id").references(() => brands.id),
+  brandId: text("brand_id").references(() => projects.id),
   currentVersion: integer("current_version").notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -77,7 +92,7 @@ export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),
   brandId: text("brand_id")
     .notNull()
-    .references(() => brands.id),
+    .references(() => projects.id),
   name: text("name").notNull(),
   handle: text("handle"),
   platform: text("platform").notNull().default("tiktok"),
@@ -147,7 +162,7 @@ export const inspirations = sqliteTable("inspirations", {
   type: text("type").notNull().default("format"),
   note: text("note"),
   tags: text("tags").notNull().default("[]"),
-  brandId: text("brand_id").references(() => brands.id),
+  brandId: text("brand_id").references(() => projects.id),
   accountId: text("account_id").references(() => accounts.id),
   /** new | analyzed | adapted | discarded */
   status: text("status").notNull().default("new"),
@@ -322,3 +337,445 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 })
+
+// ---------- growth ----------
+// Enums are whitelists in the services, no CHECK constraints. channel_id has no
+// foreign key: TikTok channels are the accounts and only exist virtually.
+
+const projectId = () =>
+  text("project_id")
+    .notNull()
+    .references(() => projects.id)
+
+export const channels = sqliteTable(
+  "channels",
+  {
+    /** e.g. chrono-web */
+    id: text("id").primaryKey(),
+    projectId: projectId(),
+    /** website | ios | android | youtube | instagram | other */
+    kind: text("kind").notNull(),
+    name: text("name"),
+    url: text("url"),
+    handle: text("handle"),
+    externalId: text("external_id"),
+    /** active | paused | planned */
+    status: text("status").notNull().default("active"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("channels_project").on(t.projectId)]
+)
+
+export const collectors = sqliteTable(
+  "collectors",
+  {
+    projectId: projectId(),
+    /** health | audit | gsc | ga4 | bing | psi | app | play | asc | geo-chatgpt */
+    collector: text("collector").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    /** JSON object, collector specific */
+    config: text("config").notNull().default("{}"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.collector] })]
+)
+
+export const collectorRuns = sqliteTable(
+  "collector_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    collector: text("collector").notNull(),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    ok: integer("ok", { mode: "boolean" }),
+    summary: text("summary"),
+    error: text("error"),
+    /** JSON object */
+    stats: text("stats").notNull().default("{}"),
+    actor: text("actor").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("collector_runs_project_collector").on(
+      t.projectId,
+      t.collector,
+      t.startedAt
+    ),
+    index("collector_runs_started").on(t.startedAt),
+  ]
+)
+
+export const kpiDaily = sqliteTable(
+  "kpi_daily",
+  {
+    projectId: projectId(),
+    /** gsc | bing | ga4 | psi | app | play | asc | health | … */
+    source: text("source").notNull(),
+    date: text("date").notNull(),
+    /** e.g. clicks, sessions, event:download_click */
+    metric: text("metric").notNull(),
+    /** '' = daily total, otherwise stable JSON with sorted keys */
+    dims: text("dims").notNull().default(""),
+    value: real("value").notNull(),
+    channelId: text("channel_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.projectId, t.source, t.date, t.metric, t.dims],
+    }),
+    index("kpi_daily_project_date").on(t.projectId, t.date),
+    index("kpi_daily_project_metric").on(
+      t.projectId,
+      t.source,
+      t.metric,
+      t.date
+    ),
+  ]
+)
+
+export const searchDaily = sqliteTable(
+  "search_daily",
+  {
+    projectId: projectId(),
+    /** gsc | bing */
+    source: text("source").notNull(),
+    date: text("date").notNull(),
+    query: text("query").notNull(),
+    /** '' when the source has no page */
+    page: text("page").notNull().default(""),
+    clicks: real("clicks").notNull().default(0),
+    impressions: real("impressions").notNull().default(0),
+    ctr: real("ctr").notNull().default(0),
+    position: real("position").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.projectId, t.source, t.date, t.query, t.page],
+    }),
+    index("search_daily_project_date").on(t.projectId, t.date),
+    index("search_daily_project_page").on(t.projectId, t.page),
+  ]
+)
+
+export const auditRuns = sqliteTable(
+  "audit_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    at: text("at").notNull(),
+    pages: integer("pages").notNull().default(0),
+    ok: integer("ok", { mode: "boolean" }).notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("audit_runs_project_at").on(t.projectId, t.at)]
+)
+
+export const auditIssues = sqliteTable(
+  "audit_issues",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: integer("run_id")
+      .notNull()
+      .references(() => auditRuns.id),
+    projectId: projectId(),
+    url: text("url").notNull(),
+    code: text("code").notNull(),
+    /** error | warning | info */
+    severity: text("severity").notNull(),
+    detail: text("detail"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("audit_issues_run").on(t.runId),
+    index("audit_issues_project").on(t.projectId),
+  ]
+)
+
+export const auditPages = sqliteTable(
+  "audit_pages",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: integer("run_id")
+      .notNull()
+      .references(() => auditRuns.id),
+    projectId: projectId(),
+    url: text("url").notNull(),
+    /** JSON object */
+    data: text("data").notNull().default("{}"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("audit_pages_run_url").on(t.runId, t.url),
+    index("audit_pages_project").on(t.projectId),
+  ]
+)
+
+export const experiments = sqliteTable(
+  "experiments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    channelId: text("channel_id"),
+    title: text("title").notNull(),
+    hypothesis: text("hypothesis"),
+    /** page | post | store | other */
+    targetType: text("target_type").notNull().default("page"),
+    target: text("target"),
+    /** clicks | impressions | ctr | position | <source>:<metric> */
+    metric: text("metric").notNull(),
+    startDate: text("start_date").notNull(),
+    baselineDays: integer("baseline_days").notNull().default(28),
+    evalDays: integer("eval_days").notNull().default(28),
+    /** running | evaluated | stopped */
+    status: text("status").notNull().default("running"),
+    /** JSON {baseline, after, change} */
+    result: text("result"),
+    /** win | loss | neutral | inconclusive */
+    verdict: text("verdict"),
+    actor: text("actor").notNull(),
+    sourceKey: text("source_key").unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("experiments_project_status").on(t.projectId, t.status),
+    index("experiments_start").on(t.startDate),
+  ]
+)
+
+export const changes = sqliteTable(
+  "changes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    channelId: text("channel_id"),
+    date: text("date").notNull(),
+    /** deploy | content | seo | store | config | shorts | other */
+    kind: text("kind").notNull().default("other"),
+    summary: text("summary").notNull(),
+    ref: text("ref"),
+    experimentId: integer("experiment_id").references(() => experiments.id),
+    actor: text("actor").notNull(),
+    sourceKey: text("source_key").unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("changes_project_date").on(t.projectId, t.date),
+    index("changes_experiment").on(t.experimentId),
+  ]
+)
+
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    accountId: text("account_id").references(() => accounts.id),
+    /** hook | format | blog_topic | draft | store_text | strategy | other */
+    kind: text("kind").notNull().default("other"),
+    title: text("title").notNull(),
+    /** Markdown */
+    body: text("body"),
+    /** JSON object */
+    payload: text("payload").notNull().default("{}"),
+    /** plan_entry | content | format | hook | experiment | backlog */
+    refType: text("ref_type"),
+    refId: text("ref_id"),
+    /** pending | approved | rejected | changes_requested | withdrawn */
+    status: text("status").notNull().default("pending"),
+    requestedBy: text("requested_by").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: text("decided_at"),
+    decisionNote: text("decision_note"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("approvals_project_status").on(t.projectId, t.status),
+    index("approvals_status").on(t.status),
+    index("approvals_ref").on(t.refType, t.refId),
+  ]
+)
+
+export const contentItems = sqliteTable(
+  "content_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    channelId: text("channel_id"),
+    /** blog | landing | store_text | other */
+    kind: text("kind").notNull().default("blog"),
+    title: text("title").notNull(),
+    keyword: text("keyword"),
+    intent: text("intent"),
+    brief: text("brief"),
+    /** idea | approved | draft | review | live | discarded */
+    status: text("status").notNull().default("idea"),
+    /** absolute path, may lie outside the data dir (reference only) */
+    draftPath: text("draft_path"),
+    /** e.g. /blog/ueberstunden */
+    urlPath: text("url_path"),
+    liveDate: text("live_date"),
+    approvalId: integer("approval_id").references(() => approvals.id),
+    notes: text("notes"),
+    position: integer("position").notNull().default(0),
+    actor: text("actor").notNull(),
+    sourceKey: text("source_key").unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("content_items_project_status").on(t.projectId, t.status)]
+)
+
+export const backlogItems = sqliteTable(
+  "backlog_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    title: text("title").notNull(),
+    detail: text("detail"),
+    /** seo | tech | content | store | growth | other */
+    kind: text("kind").notNull().default("other"),
+    /** 1–3 */
+    impact: integer("impact").notNull().default(2),
+    /** 1–3 */
+    effort: integer("effort").notNull().default(2),
+    /** open | doing | done | dropped */
+    status: text("status").notNull().default("open"),
+    source: text("source"),
+    doneRef: text("done_ref"),
+    position: integer("position").notNull().default(0),
+    actor: text("actor").notNull(),
+    sourceKey: text("source_key").unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("backlog_items_project_status").on(t.projectId, t.status)]
+)
+
+export const geoQuestions = sqliteTable(
+  "geo_questions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    text: text("text").notNull(),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    sourceKey: text("source_key").unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("geo_questions_project_text").on(t.projectId, t.text)]
+)
+
+export const geoChecks = sqliteTable(
+  "geo_checks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    questionId: integer("question_id")
+      .notNull()
+      .references(() => geoQuestions.id),
+    date: text("date").notNull(),
+    /** e.g. chatgpt-web */
+    engine: text("engine").notNull(),
+    /** ok | error */
+    status: text("status").notNull().default("ok"),
+    mentioned: integer("mentioned", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    position: integer("position"),
+    cited: integer("cited", { mode: "boolean" }).notNull().default(false),
+    inSources: integer("in_sources", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    brands: text("brands").notNull().default("[]"),
+    competitors: text("competitors").notNull().default("[]"),
+    links: text("links").notNull().default("[]"),
+    citedUrls: text("cited_urls").notNull().default("[]"),
+    sources: text("sources").notNull().default("[]"),
+    answer: text("answer"),
+    model: text("model"),
+    /** path to the evidence file */
+    evidence: text("evidence"),
+    meta: text("meta").notNull().default("{}"),
+    error: text("error"),
+    sourceKey: text("source_key").unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("geo_checks_project_question_date_engine").on(
+      t.projectId,
+      t.questionId,
+      t.date,
+      t.engine
+    ),
+    index("geo_checks_project_date").on(t.projectId, t.date),
+  ]
+)
+
+export const mentionTargets = sqliteTable(
+  "mention_targets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    domain: text("domain").notNull(),
+    url: text("url"),
+    /** app_store | comparison | guide | forum | press | vendor | other */
+    kind: text("kind").notNull().default("other"),
+    seenCount: integer("seen_count").notNull().default(0),
+    citedCount: integer("cited_count").notNull().default(0),
+    firstSeen: text("first_seen"),
+    lastSeen: text("last_seen"),
+    /** new | contacted | listed | rejected | ignored */
+    status: text("status").notNull().default("new"),
+    contact: text("contact"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("mention_targets_project_domain").on(t.projectId, t.domain),
+  ]
+)
+
+export const storeReviews = sqliteTable(
+  "store_reviews",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    /** app_store | google_play */
+    store: text("store").notNull(),
+    reviewId: text("review_id").notNull(),
+    date: text("date"),
+    rating: integer("rating"),
+    title: text("title"),
+    body: text("body"),
+    language: text("language"),
+    version: text("version"),
+    reply: text("reply"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("store_reviews_project_store_review").on(
+      t.projectId,
+      t.store,
+      t.reviewId
+    ),
+    index("store_reviews_project_date").on(t.projectId, t.date),
+  ]
+)

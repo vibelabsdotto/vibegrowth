@@ -4,29 +4,29 @@ import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import { Command, Option } from "commander"
-import * as cat from "../core/catalog"
+import * as cat from "../../api/src/core/catalog"
 import {
   configFilePath,
   ConfigError,
   env,
   resolveConfig,
   writeConfigFile,
-} from "../core/config"
-import { accountsUsingFormat, activeFormat, buildContext } from "../core/context"
-import { appRoot, openDb, tx, type Ctx } from "../core/db"
-import { folderFor, openPath, renderPost } from "../core/files"
-import { importContent } from "../core/import"
-import * as know from "../core/knowledge"
-import { accountStats, postStats, pullMetrics } from "../core/metrics"
-import * as plan from "../core/plan"
+} from "../../api/src/core/config"
+import { accountsUsingFormat, activeFormat, buildContext } from "../../api/src/core/context"
+import { appRoot, openDb, tx, type Ctx } from "../../api/src/core/db"
+import { folderFor, openPath, renderPost } from "../../api/src/core/files"
+import { importContent } from "../../api/src/core/import"
+import * as know from "../../api/src/core/knowledge"
+import { accountStats, postStats, pullMetrics } from "../../api/src/core/metrics"
+import * as plan from "../../api/src/core/plan"
 import {
   getPost,
   listPosts,
   markPosted,
   registerPost,
   unregisteredPostDirs,
-} from "../core/posts"
-import { VSError } from "../core/util"
+} from "../../api/src/core/posts"
+import { VSError } from "../../api/src/core/util"
 import { printHuman } from "./print"
 
 /** "vibegrowth", or "vibeshorts" when called through the old name (kept as alias). */

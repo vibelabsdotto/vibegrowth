@@ -1,34 +1,40 @@
-<!-- BEGIN:nextjs-agent-rules -->
-
-## This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
-
 # VibeGrowth
 
-Lokales Growth-Studio für alle VibeLabs-Projekte (früher VibeShorts): Shortform-Modul und Growth-Modul für Websites und Apps. Web-App (Next.js, nur Loopback) und CLI teilen dieselbe Logik in `core/` und dieselbe SQLite-Datenbank. Agents arbeiten nur über die CLI mit `--json`.
+Lokales Growth-Studio für alle VibeLabs-Projekte (früher VibeShorts): Shortform-Modul und Growth-Modul für Websites und Apps. npm-Monorepo mit API (NestJS), Web (Next.js) und CLI. Alles läuft nur auf `127.0.0.1`, ohne Login. Agents arbeiten nur über die CLI mit `--json`.
+
+Verbindlich: `docs/CONTRACT.md` (Endpunkte, Schema, CLI-Kompatibilität). Abweichungen nur mit Byte, dann den Kontrakt im selben Commit anpassen.
 
 ## Aufbau
 
 | Ort | Zweck |
 |---|---|
-| `core/` | Schema (Drizzle), DB-Öffnen mit WAL und Migration, gesamte Fachlogik |
-| `cli/` | Commander-CLI, gebündelt nach `dist/cli.mjs` (`npm run build:cli`), Einstieg `bin/vibegrowth.mjs`, Alias `bin/vibeshorts.mjs` |
-| `app/` | Seiten (Server Components lesen direkt aus `core/`), `actions.ts` für alle Schreibvorgänge aus dem Browser, `media/` liefert Bilder und Videos aus dem Datenordner |
-| `components/` | Eigene Komponenten; `components/ui/` sind shadcn-Komponenten (base-nova, Base UI) |
-| `renderer/` | Python-Renderer, Zahlen-Abruf, gebündelte OFL-Fonts |
-| `drizzle/` | SQL-Migrationen, nach Schemaänderung `npm run db:generate` |
+| `apps/api/` | NestJS-API, Port 4311 (`VIBEGROWTH_API_PORT`), Präfix `/api`, einziger Zugriff auf SQLite |
+| `apps/api/src/core/` | Domänenschicht aus VibeShorts: `schema.ts` (einzige Schemaquelle), `db.ts` (Öffnen mit WAL, Migrator mit Ledger `_migrations`), `config.ts`, Fachlogik. Nest-Services kapseln diese Funktionen |
+| `apps/api/src/database/` | `DatabaseService`: hält den `Ctx` aus `core/db.ts`, `tx()` für Schreibvorgänge |
+| `apps/api/src/common/` | `@Actor()` (Header `X-Actor`, Default `agent`), JSON-Exception-Filter, Fehlerklassen |
+| `apps/api/src/shorts/`, `growth/`, `collectors/` | Module der Lanes, je ein Aggregator-Modul in `app.module.ts` registriert |
+| `apps/api/drizzle/` | SQL-Migrationen + `meta/` (Snapshots, Journal) |
+| `apps/api/renderer/` | Python-Renderer, TikTok-Zahlen-Abruf, OFL-Fonts |
+| `apps/web/` | Next.js-App, Port 4310, `components/ui/` sind shadcn-Komponenten (base-nova, Base UI). Eigene Regeln in `apps/web/AGENTS.md` |
+| `apps/cli/` | Commander-CLI, mit esbuild nach `dist/cli.mjs` gebündelt; bins `vibegrowth` und Alias `vibeshorts` in `bin/` |
+| `skills/vibegrowth/` | Skill für Agents, die die CLI nutzen |
+
+## Befehle
+
+- Alle Workspaces: `npm run typecheck`, `npm run lint`, `npm run build`. Einzeln: `npm run <skript> --workspace apps/api`.
+- Entwicklung: `npm run dev:api`, `npm run dev:web`. Für die API `VIBEGROWTH_DB=<kopie>` setzen.
+- Migration nach Schemaänderung: `npm run db:generate`. Danach ein zweites Mal ausführen, es darf keine neue Migration entstehen.
+- `npm install` nur im Root (ein Lockfile).
 
 ## Regeln
 
-- Jeder Schreibvorgang läuft über eine Funktion in `core/`, schreibt einen `history`-Eintrag mit Akteur und läuft in einer `BEGIN IMMEDIATE`-Transaktion (`tx`). Keine Schreibzugriffe an `core/` vorbei.
-- Einträge mit `locked` oder `origin = max` ändert nur der Akteur `max`. Der Browser schreibt immer als `max`.
+- Jeder Schreibvorgang läuft über eine Service-Methode in `tx()` (`BEGIN IMMEDIATE`) und schreibt einen `history`-Eintrag mit Akteur. Keine Schreibzugriffe an den Services vorbei.
+- Einträge mit `locked` oder `origin = max` ändert nur der Akteur `max`. Freigaben entscheidet nur `max`. Der Browser schreibt immer als `max`.
+- Shorts-JSON bleibt byte-gleich zur CLI am Commit `702c6c5` (Kontrakt §0). Logik aus `core/` übernehmen, nicht neu schreiben.
+- Migrationen nur anhängen, bestehende nie ändern. Keine Tabellen-Rebuilds bestehender Tabellen: drizzle-kit erzeugt bei FK- oder Spaltenänderungen `__new_*`-Kopien, die von Hand durch `ALTER TABLE` ersetzt werden.
 - `plan fill` schreibt nur freie Tage. Mediendateien nie verschieben, umbenennen oder löschen; Pfade relativ zum Datenordner speichern.
 - `import` bleibt idempotent: jede importierte Zeile hat einen `source_key`, bestehende Zeilen werden nie überschrieben.
-- Web-App bindet nur an `127.0.0.1`, `proxy.ts` lehnt fremde Hosts ab. Kein Login, keine Secrets im Repo, TikTok-Cookies kommen aus einem externen `tiktok_pull.py`.
-- UI: shadcn-Komponenten zuerst, Overlays als Drawer von rechts, Toasts über `toast.add`.
-- Vor Abschluss: `npm run typecheck`, `npm run lint`, `npm run build`.
+- Nie die Produktions-DB öffnen. Arbeiten auf einer Kopie (`sqlite3 <db> ".backup '<kopie>'"`, dann `VIBEGROWTH_DB=<kopie>`).
+- `.hermes/frozen` (Produktion auf Port 4310) nicht ändern, nicht linten, Port 4310 nicht belegen.
+- Keine Secrets im Repo. Collector-Zugänge liegen in `secretsDir` und werden nur gelesen.
+- Keine Testdateien im Repo. Prüfskripte gehören in den Scratch-Ordner.

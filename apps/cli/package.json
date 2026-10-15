@@ -1,0 +1,32 @@
+{
+  "name": "@vibegrowth/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "VibeGrowth CLI für Agents (commander, mit esbuild gebündelt nach dist/cli.mjs)",
+  "license": "MIT",
+  "bin": {
+    "vibegrowth": "bin/vibegrowth.mjs",
+    "vibeshorts": "bin/vibeshorts.mjs"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/cli.mjs --external:better-sqlite3",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "cli": "tsx src/index.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "commander": "^15.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

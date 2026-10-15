@@ -33,9 +33,9 @@ apps/api/      NestJS (aktuelle Stable) + drizzle + better-sqlite3. Port 4311 (P
   drizzle/     SQL-Migrationen + meta/_journal.json (inkl. der drei bestehenden 0000–0002)
   renderer/    Python-Renderer, TikTok-Zahlen-Abruf, OFL-Fonts (vorher renderer/)
   src/
-    database/  DatabaseModule, schema.ts (einzige Schemaquelle), Migrator
-    common/    Fehlerklasse VGError, Actor-Decorator, Exception-Filter, util (vorher core/util.ts)
-    config/    Config-Auflösung (vorher core/config.ts, unverändert übernehmen)
+    core/      Domänenschicht aus VibeShorts (vorher core/): schema.ts (einzige Schemaquelle), db.ts (Öffnen + Migrator), config.ts, util.ts (VGError = VSError), Fachlogik. Services kapseln diese Funktionen
+    database/  DatabaseModule: DatabaseService hält den Ctx aus core/db.ts, tx()
+    common/    Actor-Decorator, Exception-Filter, Re-Export der Fehlerklassen
     shorts/    ShortsModule: accounts, characters, formats, rules, image-errors, plan, posts, metrics, knowledge, hooks, inspo, history, context, render, import, media
     growth/    GrowthModule: projects, channels, collectors, kpi, funnel, overview, approvals, content, backlog, experiments, changes, geo, mentions, store, search, audit, context
     collectors/ CollectorsModule: ein Provider pro Collector (TS-Port von growth.py)
@@ -117,7 +117,7 @@ CLI-lokal bleiben: `init` (schreibt Config, ruft danach `GET /health`), `serve` 
 
 ## 6. Schema
 
-`apps/api/src/database/schema.ts` ist die einzige Schemaquelle. Bestehende Tabellen und Spalten (Commit `702c6c5`, `core/schema.ts`) bleiben unverändert, außer:
+`apps/api/src/core/schema.ts` ist die einzige Schemaquelle. Bestehende Tabellen und Spalten (Commit `702c6c5`, `core/schema.ts`) bleiben unverändert, außer:
 
 - `brands` → **`projects`** (`ALTER TABLE brands RENAME TO projects`; SQLite zieht die FKs in `accounts`, `characters`, `formats`, `inspirations` mit). Neue Spalten: `url` TEXT, `kind` TEXT NOT NULL DEFAULT `'app'` (`app|website|tool|other`), `status` TEXT NOT NULL DEFAULT `'active'` (`active|paused|archived`), `language` TEXT, `repo` TEXT, `workspace` TEXT, `config` TEXT NOT NULL DEFAULT `'{}'` (JSON: optional `funnel`, siehe §7.3).
 

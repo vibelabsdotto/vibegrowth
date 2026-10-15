@@ -1,6 +1,5 @@
 import fs from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import Database from "better-sqlite3"
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 import { env, resolveConfig, type VibeGrowthConfig } from "./config"
@@ -14,28 +13,28 @@ export interface Ctx {
   config: VibeGrowthConfig
 }
 
-/** Repo root (contains drizzle/ and renderer/). */
+/** API package root apps/api (contains drizzle/ and renderer/). */
 export function appRoot(): string {
   const starts = [env("APP_ROOT"), process.cwd()]
-  try {
-    starts.push(path.dirname(fileURLToPath(import.meta.url)))
-  } catch {
-    // import.meta.url is not a file URL inside some bundles
-  }
+  // CommonJS (Nest build, tsx): the module's own folder. Undefined in the ESM CLI bundle.
+  if (typeof __dirname === "string") starts.push(__dirname)
   for (const start of starts) {
     if (!start) continue
     // Local app: never deployed, whole-project tracing does not matter.
     let dir = path.resolve(/*turbopackIgnore: true*/ start)
     for (;;) {
-      if (fs.existsSync(path.join(dir, "drizzle", "meta", "_journal.json")))
-        return dir
+      // Monorepo root: drizzle/ lives in apps/api.
+      for (const root of [dir, path.join(dir, "apps", "api")]) {
+        if (fs.existsSync(path.join(root, "drizzle", "meta", "_journal.json")))
+          return root
+      }
       const parent = path.dirname(dir)
       if (parent === dir) break
       dir = parent
     }
   }
   throw new Error(
-    "VibeGrowth-Repo (drizzle/) nicht gefunden. VIBEGROWTH_APP_ROOT auf das Repo setzen."
+    "VibeGrowth-API (apps/api/drizzle/) nicht gefunden. VIBEGROWTH_APP_ROOT auf apps/api setzen."
   )
 }
 

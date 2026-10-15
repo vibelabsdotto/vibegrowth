@@ -3,14 +3,21 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core"
 import type { Ctx } from "./db"
 import { history } from "./schema"
 
+export type ErrorCode =
+  "NOT_FOUND" | "LOCKED" | "INVALID" | "CONFLICT" | "EXTERNAL"
+
 export class VSError extends Error {
   constructor(
-    public code: "NOT_FOUND" | "LOCKED" | "INVALID" | "CONFLICT" | "EXTERNAL",
+    public code: ErrorCode,
     message: string
   ) {
     super(message)
   }
 }
+
+/** VibeGrowth name of the same class. New code throws VGError. */
+export const VGError = VSError
+export type VGError = VSError
 
 export const MAX = "max"
 export const isMax = (actor: string) => actor.toLowerCase() === MAX
