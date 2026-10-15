@@ -18,6 +18,7 @@ import {
 } from "./common"
 import { configFilePath, resolvedDbPath, writeConfigFile } from "./config"
 import { registerGrowth } from "./growth"
+import { registerImportGrowth } from "./import-growth"
 import { apiUrl, CliError, env, seg } from "./http"
 import { registerServe } from "./serve"
 
@@ -1210,5 +1211,6 @@ program
 
 registerServe(program)
 registerGrowth(program)
+registerImportGrowth(program)
 
 program.parseAsync().catch(fail)

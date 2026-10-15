@@ -397,6 +397,8 @@ export const collectorRuns = sqliteTable(
     /** JSON object */
     stats: text("stats").notNull().default("{}"),
     actor: text("actor").notNull(),
+    /** Set by the website-growth import (runs.id), null for own runs */
+    sourceKey: text("source_key").unique(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -474,6 +476,8 @@ export const auditRuns = sqliteTable(
     at: text("at").notNull(),
     pages: integer("pages").notNull().default(0),
     ok: integer("ok", { mode: "boolean" }).notNull().default(true),
+    /** Set by the website-growth import (runs.id), null for own runs */
+    sourceKey: text("source_key").unique(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
