@@ -452,6 +452,27 @@ export function setHookWinner(
   )
 }
 
+/** Correct text and/or mechanism of an existing hook; winner flag and variants stay. */
+export function updateHook(
+  ctx: Ctx,
+  id: number,
+  input: { text?: string; mechanism?: string | null },
+  actor: string
+) {
+  if (input.text !== undefined && !input.text.trim())
+    throw new VSError("INVALID", "Hook-Text fehlt")
+  if (input.text === undefined && input.mechanism === undefined)
+    throw new VSError("INVALID", "Nichts zu ändern: --text oder --mechanism")
+  return patchRow(
+    ctx,
+    hooks,
+    "hook",
+    id,
+    { text: input.text?.trim(), mechanism: input.mechanism },
+    actor
+  )
+}
+
 /** Add a variant (same mechanism, other topic) to a winner hook. */
 export function addHookVariant(
   ctx: Ctx,

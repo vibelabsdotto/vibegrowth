@@ -111,6 +111,15 @@ export class HooksController {
     )
   }
 
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Input() body: { text?: string; mechanism?: string | null },
+    @Actor() actor: string
+  ) {
+    return this.db.tx(() => know.updateHook(this.db.ctx, int(id), body, actor))
+  }
+
   @Post(":id/variants")
   variant(
     @Param("id") id: string,

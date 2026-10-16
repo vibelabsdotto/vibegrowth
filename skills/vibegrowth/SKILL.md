@@ -30,7 +30,7 @@ Ist die CLI oder die API nicht erreichbar (Code `API`), mit dem letzten bekannte
 
 ## Shortform-Regeln
 
-- Gewinner (ab 48 h mindestens 2× Median, `metrics.winners`): `hook add --account <id> --text … --mechanism … --winner --post <id>`, danach bis zu drei Varianten mit `hook variant <id> --text …` und als Planeinträge mit `--hook-id`.
+- Gewinner (ab 48 h mindestens 2× Median, `metrics.winners`): `hook add --account <id> --text … --mechanism … --winner --post <id>`, danach bis zu drei Varianten mit `hook variant <id> --text …` und als Planeinträge mit `--hook-id`. Tippfehler oder falsche Zeilenumbrüche korrigieren: `hook update <id> --text "…" [--mechanism …]` (`\n` im Text wird ein echter Zeilenumbruch, `--mechanism null` leert); Gewinner-Flag und Varianten bleiben.
 - Aktives Format eines Accounts wechseln: `accounts update <id> --format <format> --reason "<Begründung>"`. Legt die Pivot-Entscheidung automatisch an.
 - Format ändern als Pivot: `formats version <id> --note "<Begründung>" [--guide-file <md>] [--skills a,b] [--examples <pfad>,<pfad>]`. Nicht angegebene Felder übernimmt die neue Version.
 - Format korrigieren ohne neue Version: `formats update <id> --guide-file <md>` (ebenso `--description`, `--skills`, `--examples`, `--params`, `--name`). Für Tippfehler und Nachträge, nicht für inhaltliche Wechsel.

@@ -1071,6 +1071,19 @@ hookCmd
     )
   )
 hookCmd
+  .command("update <id>")
+  .description("Text oder Mechanismus eines Hooks korrigieren")
+  .option("--text <text>", "neuer Text; \\n wird zu einem Zeilenumbruch")
+  .option("--mechanism <text>", "neuer Mechanismus; 'null' leert ihn")
+  .action(
+    run((id: string, o: { text?: string; mechanism?: string }) =>
+      api.patch(`/hooks/${int(id)}`, {
+        text: o.text?.replace(/\\n/g, "\n"),
+        mechanism: nullable(o.mechanism),
+      })
+    )
+  )
+hookCmd
   .command("variant <id>")
   .description("Variante eines Gewinner-Hooks (max. 3)")
   .requiredOption("--text <text>")
