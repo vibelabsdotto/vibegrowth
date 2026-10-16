@@ -1,4 +1,6 @@
 import { Inbox } from "lucide-react"
+import { FeatureRequestList } from "@/components/app-inbox/feature-request-list"
+import { ReviewList } from "@/components/app-inbox/review-list"
 import { inboxKey, replyType } from "@/components/growth/approval-app"
 import {
   ApprovalInbox,
@@ -6,7 +8,7 @@ import {
 } from "@/components/growth/approval-inbox"
 import { CategoryTabs } from "@/components/growth/category"
 import { APPROVAL_KIND_LABEL } from "@/components/growth/format"
-import { load, projectScope } from "@/components/growth/server"
+import { load, projectScope, requestTime } from "@/components/growth/server"
 import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
 import { SectionError } from "@/components/growth/status"
 import { UrlFilter } from "@/components/growth/url-filter"
@@ -17,7 +19,9 @@ import type {
   AppInbox,
   Approval,
   ContentItem,
+  InboxFeatureRequest,
   InboxItem,
+  InboxReview,
   ReplyPayload,
   TaskPayload,
 } from "@/lib/growth-types"
@@ -44,12 +48,30 @@ export default async function ApprovalsPage({
     category: category || undefined,
   }
   const itemId = Number(sp.item)
-  const [res, decidedRes, pendingRes] = await Promise.all([
+  const showInbox = !sp.kind && (!category || category === "app")
+  const [res, decidedRes, pendingRes, openRes] = await Promise.all([
     load<Approval[]>("/approvals", { ...filter, status: "pending" }),
     load<Approval[]>("/approvals", { ...filter, status: DECIDED, limit: 15 }),
     // The note below says what the project filter hides.
     project ? load<Approval[]>("/approvals", { status: "pending" }) : null,
+    // Inbox items no agent has suggested anything for yet: they must not get lost.
+    showInbox
+      ? load<AppInbox>("/app/inbox", {
+          project: project || undefined,
+          state: "open",
+          limit: 500,
+        })
+      : null,
   ])
+  const openItems = (openRes?.data?.items ?? []).filter(
+    (i) => i.state === "open"
+  )
+  const openRequests = openItems.filter(
+    (i): i is InboxFeatureRequest => i.type === "feature_request"
+  )
+  const openReviews = openItems.filter(
+    (i): i is InboxReview => i.type === "review"
+  )
   const rows = res.data ?? []
   const decided = decidedRes.data ?? []
   // Deep link (?item=<id>) to an approval outside the current filter or list.
@@ -132,6 +154,41 @@ export default async function ApprovalsPage({
           }
         />
       )}
+
+      {openItems.length ? (
+        <section
+          aria-labelledby="approvals-open-inbox"
+          className="flex flex-col gap-3"
+        >
+          <div className="flex flex-col gap-1">
+            <h2 id="approvals-open-inbox" className="text-base font-medium">
+              Noch ohne Vorschlag
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Feature Requests und Bewertungen, zu denen der Agent noch nichts
+              vorgeschlagen hat. Du kannst selbst antworten oder sie als
+              erledigt markieren.
+            </p>
+          </div>
+          {openRequests.length ? (
+            <FeatureRequestList
+              items={openRequests}
+              visible={openRequests.map((i) => i.itemId)}
+              projectNames={project ? null : names}
+              now={requestTime()}
+              param="inbox"
+            />
+          ) : null}
+          {openReviews.length ? (
+            <ReviewList
+              items={openReviews}
+              visible={openReviews.map((i) => i.itemId)}
+              projectNames={project ? null : names}
+              param="inbox"
+            />
+          ) : null}
+        </section>
+      ) : null}
     </div>
   )
 }

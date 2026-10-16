@@ -14,10 +14,13 @@ export const inboxRowId = (itemId: string) => `inbox-${itemId}`
  * trip), so the sheet is deep-linkable. `items` holds every loaded item, not only the
  * filtered rows: an item that leaves the filter after an action stays open.
  */
-export function useInboxItem<T extends InboxItem>(items: T[]) {
+export function useInboxItem<T extends InboxItem>(
+  items: T[],
+  param: string = ITEM_PARAM
+) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const openId = searchParams.get(ITEM_PARAM)
+  const openId = searchParams.get(param)
   const current = openId
     ? (items.find((i) => i.itemId === openId) ?? null)
     : null
@@ -28,8 +31,8 @@ export function useInboxItem<T extends InboxItem>(items: T[]) {
 
   const setItem = (id: string | null) => {
     const next = new URLSearchParams(searchParams.toString())
-    if (id) next.set(ITEM_PARAM, id)
-    else next.delete(ITEM_PARAM)
+    if (id) next.set(param, id)
+    else next.delete(param)
     const qs = next.toString()
     window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname)
   }

@@ -19,14 +19,17 @@ export function FeatureRequestList({
   visible,
   projectNames,
   now,
+  param,
 }: {
   items: InboxFeatureRequest[]
   visible: string[]
   /** Project names when the page shows all projects, otherwise null. */
   projectNames: Record<string, string> | null
+  /** URL parameter of the open item; pages with a second sheet use their own. */
+  param?: string
   now: number
 }) {
-  const { item, open, setItem, onClosed } = useInboxItem(items)
+  const { item, open, setItem, onClosed } = useInboxItem(items, param)
   const shownIds = new Set(visible)
   const rows = items.filter((r) => shownIds.has(r.itemId))
   return (
