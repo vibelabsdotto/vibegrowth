@@ -1,5 +1,49 @@
 /** Labels and small helpers for the app inbox pages. Pure, usable on server and client. */
 
+import type {
+  InboxItem,
+  InboxState,
+  InboxStateCounts,
+} from "@/lib/growth-types"
+
+/** Item state (contract §7.8) in German. */
+export const INBOX_STATE_LABEL: Record<InboxState, string> = {
+  open: "offen",
+  proposal: "Vorschlag wartet",
+  approved: "freigegeben",
+  answered: "beantwortet",
+  no_reply: "keine Antwort nötig",
+  stale: "veraltet",
+  error: "Fehler",
+}
+
+/** States shown by the default filter „Offen + Vorschlag“. */
+export const ACTIVE_STATES: readonly InboxState[] = ["open", "proposal"]
+
+export type InboxFilter = "open" | "all"
+
+/**
+ * ?filter= of the inbox pages. Only "all" widens the list; everything else, including
+ * old values such as "needs-reply", falls back to the default „Offen + Vorschlag“.
+ */
+export function inboxFilter(v: string | undefined): InboxFilter {
+  return v === "all" ? "all" : "open"
+}
+
+export function isActiveState(state: InboxState) {
+  return ACTIVE_STATES.includes(state)
+}
+
+/** Open plus proposal from the API counts, counted from the items when the API has none. */
+export function activeCount(
+  byState: InboxStateCounts | undefined,
+  items: InboxItem[]
+) {
+  if (byState)
+    return ACTIVE_STATES.reduce((sum, s) => sum + (byState[s] ?? 0), 0)
+  return items.filter((i) => isActiveState(i.state)).length
+}
+
 /** Featurama request status (Featurama's own wording mapped to German). */
 export const FEATURAMA_STATUS_LABEL: Record<string, string> = {
   Requested: "Angefragt",

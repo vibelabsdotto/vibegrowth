@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { ApiError, apiFetch } from "@/lib/api"
 import type {
   Approval,
+  ApprovalEffect,
   BacklogItem,
   Change,
   ContentDetail,
@@ -64,21 +65,48 @@ function compact(o: Values) {
 
 export type Decision = "approved" | "rejected" | "changes_requested"
 
-/** `text` only for kind reply with approved: replaces payload.text (original stays in history). */
+/**
+ * `text` only for kind reply with approved: replaces payload.text (original stays in history).
+ * `noReply` only for kind reply with rejected: marks the inbox item as "keine Antwort nötig".
+ */
 export async function decideApproval(
   id: number,
   decision: Decision,
   note?: string,
-  text?: string
+  text?: string,
+  noReply?: boolean
 ) {
-  return call<Approval & { effects?: unknown[] }>(
+  return call<Approval & { effects?: ApprovalEffect[] }>(
     `/approvals/${id}/decide`,
     "POST",
     {
       decision,
       note: note?.trim() ? note.trim() : undefined,
       text: text?.trim() ? text.trim() : undefined,
+      noReply: noReply ? true : undefined,
     }
+  )
+}
+
+// ---------- app inbox ----------
+
+export type InboxTarget = { project: string; target: string; itemId: string }
+
+/** Own reply by Max: an approved reply approval, posted by the next app publish run. */
+export async function replyToInboxItem(item: InboxTarget, text: string) {
+  return call<Approval & { effects?: ApprovalEffect[] }>(
+    "/app/inbox/reply",
+    "POST",
+    { ...item, text: text.trim() }
+  )
+}
+
+/** "Keine Antwort nötig" until the user writes again. */
+export async function markInboxNoReply(item: InboxTarget) {
+  return call<{ state: string; effects?: ApprovalEffect[] }>(
+    "/app/inbox/no-reply",
+    "POST",
+    item
   )
 }
 
@@ -124,6 +152,7 @@ function contentFields(v: Values) {
     brief: s(v.brief),
     urlPath: s(v.urlPath),
     liveDate: s(v.liveDate),
+    plannedDate: s(v.plannedDate),
     draftPath: s(v.draftPath),
     notes: s(v.notes),
   })

@@ -41,7 +41,7 @@ export function replyType(target: string) {
 export function inboxHref(type: string, itemId: string) {
   return type === "feature_request"
     ? `/feature-requests?filter=all&item=${encodeURIComponent(itemId)}`
-    : "/reviews?filter=all"
+    : `/reviews?filter=all&item=${encodeURIComponent(itemId)}`
 }
 
 /**

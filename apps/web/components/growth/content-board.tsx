@@ -8,13 +8,17 @@ import {
   CircleX,
   Eye,
   Plus,
+  Hourglass,
   ThumbsUp,
 } from "lucide-react"
+import Link from "next/link"
+import { usePathname, useRouter } from "next/navigation"
 import { createContent, getContent, updateContent } from "@/app/growth-actions"
 import { FormDrawer, type FieldSpec } from "@/components/form-drawer"
 import { Markdown } from "@/components/markdown"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { ContentDetail, ContentItem } from "@/lib/growth-types"
 import {
@@ -90,6 +94,12 @@ const editFields: FieldSpec[] = [
     label: "URL-Pfad",
     placeholder: "/blog/ueberstunden",
   },
+  {
+    name: "plannedDate",
+    label: "Geplant am",
+    type: "date",
+    description: "Erscheint im Kalender, bis der Eintrag live ist.",
+  },
   { name: "liveDate", label: "Live seit", type: "date" },
   {
     name: "draftPath",
@@ -108,29 +118,53 @@ function initialOf(c: ContentItem) {
     intent: c.intent ?? "",
     brief: c.brief ?? "",
     urlPath: c.urlPath ?? "",
+    plannedDate: c.plannedDate ?? "",
     liveDate: c.liveDate ?? "",
     draftPath: c.draftPath ?? "",
     notes: c.notes ?? "",
   }
 }
 
+/** Link to the pending approval in Wartet auf Max (drawer opens there). */
+export function approvalHref(approvalId: number) {
+  return `/approvals?item=${approvalId}`
+}
+
+/** Edit fields of an item waiting for Max: the decision moves the status, not the form. */
+const waitingFields = editFields.filter((f) => f.name !== "status")
+
 export function ContentBoard({
   items,
   projects,
   project,
+  waiting = {},
+  initialOpen = null,
 }: {
   items: ContentItem[]
   projects: { id: string; name: string }[]
   project: string
+  /** content id -> id of its pending approval (kind content|blog_topic) */
+  waiting?: Record<number, number>
+  /** Deep link /content?item=<id>: opened on first render, with its details. */
+  initialOpen?: ContentDetail | null
 }) {
-  const [openId, setOpenId] = React.useState<number | null>(null)
-  const [snapshot, setSnapshot] = React.useState<ContentItem | null>(null)
+  const router = useRouter()
+  const pathname = usePathname()
+  const [openId, setOpenId] = React.useState<number | null>(
+    initialOpen?.id ?? null
+  )
+  const [snapshot, setSnapshot] = React.useState<ContentItem | null>(
+    initialOpen
+  )
   const [detail, setDetail] = React.useState<{
     id: number
     data: ContentDetail | null
     error: string | null
-  } | null>(null)
+  } | null>(
+    initialOpen ? { id: initialOpen.id, data: initialOpen, error: null } : null
+  )
   const opener = React.useRef<HTMLElement | null>(null)
+  const deepLinked = React.useRef(initialOpen !== null)
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
   const current = items.find((i) => i.id === openId) ?? snapshot
 
@@ -176,12 +210,37 @@ export function ContentBoard({
             {c.urlPath ? (
               <span className="max-w-48 truncate font-mono">{c.urlPath}</span>
             ) : null}
+            {c.plannedDate && c.status !== "live" ? (
+              <span className="tabular-nums">
+                geplant {fmtDate(c.plannedDate)}
+              </span>
+            ) : null}
             {c.liveDate ? (
               <span className="tabular-nums">{fmtDate(c.liveDate)}</span>
             ) : null}
+            {waiting[c.id] ? (
+              <Link
+                href={approvalHref(waiting[c.id])}
+                prefetch={false}
+                className="inline-flex items-center gap-1 rounded-sm text-foreground underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <Hourglass
+                  className="size-3 text-(--status-warn)"
+                  aria-hidden="true"
+                />
+                wartet auf Max
+              </Link>
+            ) : null}
           </>
         )}
-        onMove={(c, status) => updateContent(c.id, { status })}
+        onMove={(c, status) =>
+          waiting[c.id]
+            ? Promise.resolve({
+                ok: false as const,
+                error: `„${c.title}“ wartet auf Max. Bestätigen oder Ablehnen geht über die Freigabe in Wartet auf Max, der Status folgt daraus.`,
+              })
+            : updateContent(c.id, { status })
+        }
         onOpen={open}
         toolbar={
           <FormDrawer
@@ -196,7 +255,14 @@ export function ContentBoard({
                 options: projects.map((p) => ({ value: p.id, label: p.name })),
               },
               ...editFields.filter((f) =>
-                ["title", "kind", "keyword", "intent", "brief"].includes(f.name)
+                [
+                  "title",
+                  "kind",
+                  "keyword",
+                  "intent",
+                  "brief",
+                  "plannedDate",
+                ].includes(f.name)
               ),
             ]}
             initial={{
@@ -223,17 +289,38 @@ export function ContentBoard({
           onOpenChange={(o) => {
             if (!o) {
               setOpenId(null)
+              if (deepLinked.current) {
+                deepLinked.current = false
+                router.replace(pathname, { scroll: false })
+              }
               requestAnimationFrame(() => opener.current?.focus())
             }
           }}
           title={current.title}
           description={`${name(current.projectId)} · ${label(CONTENT_KIND_LABEL, current.kind)} · von ${actorLabel(current.actor)}`}
-          fields={editFields}
+          fields={waiting[current.id] ? waitingFields : editFields}
           initial={initialOf(current)}
           successMessage="Content gespeichert"
           action={(v) => updateContent(current.id, v)}
           width="sm:w-[min(40rem,calc(100vw-3rem))]"
         >
+          {waiting[current.id] ? (
+            <Alert role="note">
+              <Hourglass aria-hidden="true" />
+              <AlertTitle>Wartet auf Max</AlertTitle>
+              <AlertDescription className="flex flex-col items-start gap-2">
+                Bestätigen oder Ablehnen geht über die Freigabe, der Status
+                folgt daraus.
+                <Link
+                  href={approvalHref(waiting[current.id])}
+                  prefetch={false}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  Freigabe öffnen
+                </Link>
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <ContentFacts
             detail={detail?.id === current.id ? detail : null}
             brief={current.brief}

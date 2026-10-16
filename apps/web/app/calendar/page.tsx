@@ -1,10 +1,15 @@
+import Link from "next/link"
 import { Suspense } from "react"
+import type { CalendarContent } from "@/components/calendar/content-chip"
+import { CategoryTabs } from "@/components/growth/category"
 import { PageHeader } from "@/components/page-header"
 import { PlanCalendar, type CalendarAccount } from "@/components/plan-calendar"
 import { apiFetch } from "@/lib/api"
+import { parseCategory } from "@/lib/categories"
 import { isDate, localToday, monthGrid, range, weekStart } from "@/lib/dates"
-import { NoAccounts, ScopedDescription } from "@/components/scope-badge"
+import { ScopedDescription } from "@/components/scope-badge"
 import { formatsInScope, projectScope } from "@/lib/server"
+import type { CalendarResponse } from "@/lib/growth-types"
 import type {
   AccountRow,
   CalendarPost,
@@ -24,6 +29,7 @@ type Search = Promise<{
   accounts?: string
   /** Scope the account selection was made in (project id or "all"). */
   for?: string
+  category?: string
 }>
 
 export default async function CalendarPage({
@@ -35,6 +41,9 @@ export default async function CalendarPage({
   const today = localToday()
   const view = sp.view === "month" || sp.view === "3w" ? sp.view : "week"
   const anchor = isDate(sp.date) ? sp.date : today
+  const category = parseCategory(sp.category)
+  // Shortform plan rows only for Alle and Shortform; the other Bereiche show dated content.
+  const showPlan = !category || category === "shortform"
 
   const weeks: string[][] = []
   const grid =
@@ -99,10 +108,32 @@ export default async function CalendarPage({
   const ids = new Set(accounts.map((a) => a.id))
 
   // GET /plan filters one account or brand; the calendar shows a selection, so filter here.
-  const [plan, ideaPool] = await Promise.all([
+  // Plan entries stay on GET /plan (full rows for the entry drawer); GET /calendar adds the
+  // dated web content of the scope and Bereich.
+  const [plan, ideaPool, calendar] = await Promise.all([
     apiFetch<PlanEntryRow[]>("/plan", { query: { from, to, brand } }),
     apiFetch<PlanEntryRow[]>("/plan", { query: { ideas: true, brand } }),
+    apiFetch<CalendarResponse>("/calendar", {
+      query: { project: brand, from, to, category: category || undefined },
+    }),
   ])
+  const content: CalendarContent[] = calendar.items.flatMap((i) =>
+    i.type === "content"
+      ? [
+          {
+            id: i.id,
+            date: i.date,
+            title: i.title,
+            projectName: projectName[i.projectId] ?? i.projectId,
+            category: i.category,
+            dateKind: i.dateKind,
+            kind: i.kind,
+            status: i.status,
+            urlPath: i.urlPath,
+          },
+        ]
+      : []
+  )
   const entries = plan.filter((e) => ids.has(e.accountId))
   const posts: CalendarPost[] = allPosts
     .filter(
@@ -155,34 +186,56 @@ export default async function CalendarPage({
         title="Kalender"
         description={
           <ScopedDescription project={project}>
-            Der Agent plant drei Wochen im Voraus, du verschiebst, sperrst und
-            legst an, wo du willst.
+            Alles mit Datum: Shortform-Plan und Web-Content, geplant oder live.
+            Den Plan verschiebst, sperrst und ergänzt du direkt hier.
           </ScopedDescription>
         }
       />
-      {project && !allAccounts.length ? (
-        <NoAccounts project={project} what="gibt es keinen Plan" />
-      ) : (
-        <Suspense>
-          <PlanCalendar
-            view={view}
-            anchor={anchor}
-            today={today}
-            days={grid}
-            weeks={weeks}
-            showProject={!project}
-            scopeKey={scopeKey}
-            allAccounts={allAccounts}
-            accounts={accounts}
-            entries={entries}
-            posts={posts}
-            ideas={ideas}
-            formats={formats.map((f) => ({ id: f.id, name: f.name }))}
-            inspirations={inspirations}
-            postsByEntry={postsByEntry}
-          />
-        </Suspense>
-      )}
+      <CategoryTabs
+        value={category}
+        params={{
+          view: sp.view,
+          date: sp.date,
+          accounts: sp.accounts,
+          for: sp.for,
+        }}
+      />
+      <Suspense>
+        <PlanCalendar
+          view={view}
+          anchor={anchor}
+          today={today}
+          days={grid}
+          weeks={weeks}
+          showProject={!project}
+          scopeKey={scopeKey}
+          allAccounts={allAccounts}
+          accounts={accounts}
+          entries={entries}
+          posts={posts}
+          ideas={ideas}
+          formats={formats.map((f) => ({ id: f.id, name: f.name }))}
+          inspirations={inspirations}
+          postsByEntry={postsByEntry}
+          content={content}
+          showPlan={showPlan}
+          planNote={
+            project && !allAccounts.length ? (
+              <p className="text-sm text-muted-foreground">
+                {project.name} hat keine Shortform-Accounts, deshalb zeigt der
+                Kalender nur Content.{" "}
+                <Link
+                  href="/accounts"
+                  prefetch={false}
+                  className="text-foreground underline underline-offset-2"
+                >
+                  Zu den Accounts
+                </Link>
+              </p>
+            ) : null
+          }
+        />
+      </Suspense>
     </div>
   )
 }

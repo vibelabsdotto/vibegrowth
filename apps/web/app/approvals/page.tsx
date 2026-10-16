@@ -1,21 +1,22 @@
 import { Inbox } from "lucide-react"
 import { inboxKey, replyType } from "@/components/growth/approval-app"
 import {
-  ApprovalCard,
+  ApprovalInbox,
   type ApprovalContext,
-} from "@/components/growth/approval-card"
+} from "@/components/growth/approval-inbox"
 import { CategoryTabs } from "@/components/growth/category"
 import { APPROVAL_KIND_LABEL } from "@/components/growth/format"
 import { load, projectScope } from "@/components/growth/server"
 import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
-import { EmptyState, SectionError } from "@/components/growth/status"
-import { UrlFilter, UrlToggle } from "@/components/growth/url-filter"
+import { SectionError } from "@/components/growth/status"
+import { UrlFilter } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { parseCategory } from "@/lib/categories"
 import type {
   AppInbox,
   Approval,
+  ContentItem,
   InboxItem,
   ReplyPayload,
   TaskPayload,
@@ -24,13 +25,9 @@ import type {
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Wartet auf Max" }
 
-const STATUS_QUERY: Record<string, string> = {
-  pending: "pending",
-  decided: "approved,rejected,changes_requested,withdrawn",
-  all: "all",
-}
+const DECIDED = "approved,rejected,changes_requested,withdrawn"
 
-type Search = { status?: string; kind?: string; category?: string }
+type Search = { kind?: string; category?: string; item?: string }
 
 export default async function ApprovalsPage({
   searchParams,
@@ -38,41 +35,36 @@ export default async function ApprovalsPage({
   searchParams: Promise<Search>
 }) {
   const sp = await searchParams
-  const status = sp.status && STATUS_QUERY[sp.status] ? sp.status : "pending"
   const category = parseCategory(sp.category)
   const scope = await projectScope()
   const { project, projects } = scope
-  const [res, pendingRes] = await Promise.all([
-    load<Approval[]>("/approvals", {
-      status: STATUS_QUERY[status],
-      project: project || undefined,
-      kind: sp.kind,
-      category: category || undefined,
-      limit: status === "pending" ? undefined : 200,
-    }),
-    // The sidebar badge counts every project; say what the project filter hides.
-    project ? load<Approval[]>("/approvals", { status: "pending" }) : null,
-  ])
-  const elsewhere = (pendingRes?.data ?? []).filter(
-    (a) => a.projectId !== project
-  ).length
-  const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
-  const rows = res.data ?? []
-  const contexts = await appContexts(rows, project)
-  const groups = new Map<string, Approval[]>()
-  for (const a of rows) {
-    const g = groups.get(a.projectId) ?? []
-    g.push(a)
-    groups.set(a.projectId, g)
-  }
-  const ordered = [...groups.entries()].sort((a, b) =>
-    name(a[0]).localeCompare(name(b[0]), "de")
-  )
-  const params = {
-    status: sp.status,
+  const filter = {
+    project: project || undefined,
     kind: sp.kind,
     category: category || undefined,
   }
+  const itemId = Number(sp.item)
+  const [res, decidedRes, pendingRes] = await Promise.all([
+    load<Approval[]>("/approvals", { ...filter, status: "pending" }),
+    load<Approval[]>("/approvals", { ...filter, status: DECIDED, limit: 15 }),
+    // The note below says what the project filter hides.
+    project ? load<Approval[]>("/approvals", { status: "pending" }) : null,
+  ])
+  const rows = res.data ?? []
+  const decided = decidedRes.data ?? []
+  // Deep link (?item=<id>) to an approval outside the current filter or list.
+  const known = [...rows, ...decided].some((a) => a.id === itemId)
+  const linked =
+    Number.isInteger(itemId) && itemId > 0 && !known
+      ? (await load<Approval>(`/approvals/${itemId}`)).data
+      : null
+  const all = linked ? [...rows, ...decided, linked] : [...rows, ...decided]
+  const elsewhere = (pendingRes?.data ?? []).filter(
+    (a) => a.projectId !== project
+  ).length
+  const contexts = await loadContexts(all, project)
+  const names = Object.fromEntries(projects.map((p) => [p.id, p.name]))
+  const params = { kind: sp.kind, category: category || undefined }
 
   return (
     <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-6">
@@ -80,8 +72,8 @@ export default async function ApprovalsPage({
         title="Wartet auf Max"
         description={
           <ScopeLabel project={project} name={scope.name}>
-            Vorschläge der Agents. Nur du entscheidest; die Notiz geht an den
-            Agent zurück.
+            Alles, was du entscheiden musst. Ein Klick öffnet den Vorschlag,
+            deine Notiz geht an den Agent.
           </ScopeLabel>
         }
       />
@@ -103,17 +95,6 @@ export default async function ApprovalsPage({
       ) : null}
       <CategoryTabs value={category} params={params} />
       <div className="flex flex-wrap items-center gap-2">
-        <UrlToggle
-          param="status"
-          value={status}
-          params={params}
-          label="Status"
-          options={[
-            { value: "pending", label: "Offen" },
-            { value: "decided", label: "Entschieden" },
-            { value: "all", label: "Alle" },
-          ]}
-        />
         <UrlFilter
           param="kind"
           value={sp.kind ?? ""}
@@ -127,94 +108,76 @@ export default async function ApprovalsPage({
         />
         {res.data ? (
           <span className="text-sm text-muted-foreground tabular-nums sm:ml-auto">
-            {rows.length} {rows.length === 1 ? "Eintrag" : "Einträge"}
+            {rows.length} offen
           </span>
         ) : null}
       </div>
 
       {res.error !== null ? (
         <SectionError title="Freigaben nicht geladen" error={res.error} />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title={
-            status === "pending" ? "Nichts offen" : "Keine Freigaben gefunden"
-          }
-          description={
-            status === "pending"
-              ? project
-                ? `Für ${scope.name} wartet nichts auf dich.`
+      ) : (
+        <ApprovalInbox
+          pending={rows}
+          decided={decided}
+          linked={linked}
+          contexts={contexts}
+          projectNames={names}
+          showProject={!project}
+          emptyText={
+            project
+              ? `Für ${scope.name} wartet nichts auf dich.`
+              : sp.kind || category
+                ? "Für diese Filter wartet nichts auf dich."
                 : "Sobald ein Agent etwas zur Freigabe stellt, erscheint es hier."
-              : "Für diese Filter gibt es keine Einträge."
           }
         />
-      ) : project ? (
-        <div className="flex flex-col gap-3">
-          {rows.map((a) => (
-            <ApprovalCard
-              key={a.id}
-              approval={a}
-              context={contexts.get(a.id)}
-            />
-          ))}
-        </div>
-      ) : (
-        ordered.map(([projectId, items]) => (
-          <section
-            key={projectId}
-            aria-labelledby={`approvals-${projectId}`}
-            className="flex flex-col gap-3"
-          >
-            <h2
-              id={`approvals-${projectId}`}
-              className="flex items-baseline gap-2 text-sm font-semibold text-muted-foreground"
-            >
-              {name(projectId)}
-              <span className="font-normal tabular-nums">{items.length}</span>
-            </h2>
-            {items.map((a) => (
-              <ApprovalCard
-                key={a.id}
-                approval={a}
-                context={contexts.get(a.id)}
-              />
-            ))}
-          </section>
-        ))
       )}
     </div>
   )
 }
 
 /**
- * Reply and task suggestions show the message they answer: one GET /app/inbox for the
- * scope (all projects when none is chosen), matched by project, inbox type and item id.
+ * What the drawer shows next to a suggestion: the review or Featurama thread a reply
+ * answers, the inbox items behind a task, and the content item of a content idea.
  */
-async function appContexts(rows: Approval[], project: string) {
-  const out = new Map<number, ApprovalContext>()
+async function loadContexts(rows: Approval[], project: string) {
+  const out: Record<number, ApprovalContext> = {}
   const app = rows.filter((a) => a.kind === "reply" || a.kind === "task")
-  if (!app.length) return out
-  const inbox = await load<AppInbox>("/app/inbox", {
-    project: project || undefined,
-    limit: 5000,
-  })
-  const items = new Map<string, InboxItem>()
-  for (const i of inbox.data?.items ?? [])
-    items.set(inboxKey(i.projectId, i.type, i.itemId), i)
+  const content = rows.filter((a) => a.refType === "content" && a.refId)
+  const [inbox, items] = await Promise.all([
+    app.length
+      ? load<AppInbox>("/app/inbox", {
+          project: project || undefined,
+          limit: 5000,
+        })
+      : null,
+    content.length
+      ? load<ContentItem[]>("/content", { project: project || undefined })
+      : null,
+  ])
+  const byKey = new Map<string, InboxItem>()
+  for (const i of inbox?.data?.items ?? [])
+    byKey.set(inboxKey(i.projectId, i.type, i.itemId), i)
+  const contentById = new Map((items?.data ?? []).map((c) => [String(c.id), c]))
   for (const a of app) {
     if (a.kind === "reply") {
       const p = (a.payload ?? {}) as ReplyPayload
-      out.set(a.id, {
-        item: items.get(inboxKey(a.projectId, replyType(p.target), p.itemId)),
-      })
+      out[a.id] = {
+        item: byKey.get(inboxKey(a.projectId, replyType(p.target), p.itemId)),
+      }
     } else {
       const p = (a.payload ?? {}) as TaskPayload
       const sources: Record<string, InboxItem> = {}
       for (const s of p.sources ?? []) {
-        const item = items.get(inboxKey(a.projectId, s.type, s.id))
+        const item = byKey.get(inboxKey(a.projectId, s.type, s.id))
         if (item) sources[`${s.type}|${s.id}`] = item
       }
-      out.set(a.id, { sources })
+      out[a.id] = { sources }
     }
+  }
+  for (const a of content) {
+    const c = contentById.get(a.refId ?? "")
+    if (c) out[a.id] = { ...out[a.id], content: c }
   }
   return out
 }

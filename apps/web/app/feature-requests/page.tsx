@@ -1,5 +1,10 @@
 import { FeatureRequestList } from "@/components/app-inbox/feature-request-list"
-import { plural } from "@/components/app-inbox/labels"
+import {
+  activeCount,
+  inboxFilter,
+  isActiveState,
+  plural,
+} from "@/components/app-inbox/labels"
 import { load, projectScope, requestTime } from "@/components/growth/server"
 import { ScopeLabel } from "@/components/growth/scope"
 import { EmptyState, SectionError } from "@/components/growth/status"
@@ -10,7 +15,7 @@ import type { AppInbox, InboxFeatureRequest } from "@/lib/growth-types"
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Feature Requests" }
 
-/** Open requests come first in the API order, so this cap never hides one. */
+/** Open requests and proposals come first in the API order, so this cap never hides one. */
 const LIMIT = 1000
 
 type Search = { filter?: string; item?: string }
@@ -32,18 +37,11 @@ export default async function FeatureRequestsPage({
   const all = (res.data?.items ?? []).filter(
     (i): i is InboxFeatureRequest => i.type === "feature_request"
   )
-  const openCount = counts?.needsReply ?? 0
-  const filter =
-    sp.filter === "open" || sp.filter === "all"
-      ? sp.filter
-      : openCount > 0
-        ? "open"
-        : "all"
-  const rows = filter === "open" ? all.filter((r) => r.needsReply) : all
-  const deepItem =
-    sp.item && !rows.some((r) => r.requestId === sp.item)
-      ? (all.find((r) => r.requestId === sp.item) ?? null)
-      : null
+  const filter = inboxFilter(sp.filter)
+  const visible = all
+    .filter((r) => filter === "all" || isActiveState(r.state))
+    .map((r) => r.itemId)
+  const activeTotal = activeCount(counts?.byState, all)
   const projectNames = project
     ? null
     : Object.fromEntries(projects.map((p) => [p.id, p.name]))
@@ -55,7 +53,7 @@ export default async function FeatureRequestsPage({
         title="Feature Requests"
         description={
           <ScopeLabel project={project} name={scope.name}>
-            Wünsche aus Featurama. Ein Klick öffnet den Verlauf.
+            Wünsche aus Featurama. Ein Klick öffnet Verlauf und Antwort.
           </ScopeLabel>
         }
       />
@@ -71,9 +69,9 @@ export default async function FeatureRequestsPage({
               param="filter"
               value={filter}
               params={{ filter: sp.filter }}
-              label="Antwortstatus"
+              label="Status"
               options={[
-                { value: "open", label: `Braucht Antwort (${openCount})` },
+                { value: "open", label: `Offen + Vorschlag (${activeTotal})` },
                 { value: "all", label: `Alle (${total})` },
               ]}
             />
@@ -89,26 +87,24 @@ export default async function FeatureRequestsPage({
               Gezeigt werden die ersten {all.length} von {total} Requests.
             </p>
           ) : null}
-          {rows.length === 0 ? (
+          {visible.length === 0 ? (
             <EmptyState
               title={
                 filter === "open" ? "Nichts offen" : "Keine Feature Requests"
               }
               description={
                 filter === "open"
-                  ? "Alle freigegebenen Requests sind beantwortet."
+                  ? "Kein Request wartet auf eine Antwort oder einen Vorschlag."
                   : "Der Collector featurama liefert Requests, sobald er für das Projekt eingeschaltet ist."
               }
             />
           ) : null}
-          {rows.length > 0 || deepItem ? (
-            <FeatureRequestList
-              items={rows}
-              deepItem={deepItem}
-              projectNames={projectNames}
-              now={requestTime()}
-            />
-          ) : null}
+          <FeatureRequestList
+            items={all}
+            visible={visible}
+            projectNames={projectNames}
+            now={requestTime()}
+          />
         </>
       )}
     </div>

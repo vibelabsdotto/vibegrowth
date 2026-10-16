@@ -1,7 +1,8 @@
 import type { ReactNode } from "react"
 import { EyeOff } from "lucide-react"
-import type { InboxReview } from "@/lib/growth-types"
+import type { InboxReview, InboxState } from "@/lib/growth-types"
 import { cn } from "@/lib/utils"
+import { INBOX_STATE_LABEL } from "./labels"
 
 export type InboxTone = "good" | "warn" | "bad" | "info" | "neutral"
 
@@ -51,8 +52,29 @@ export function StatusToken({
   )
 }
 
-export function NeedsReplyToken() {
-  return <StatusToken tone="warn">braucht Antwort</StatusToken>
+const STATE_TONE: Record<InboxState, InboxTone> = {
+  open: "warn",
+  proposal: "info",
+  approved: "good",
+  answered: "neutral",
+  no_reply: "neutral",
+  stale: "warn",
+  error: "bad",
+}
+
+/** Inbox item state (open, proposal, approved …) as dot plus word. */
+export function InboxStateToken({
+  state,
+  className,
+}: {
+  state: InboxState
+  className?: string
+}) {
+  return (
+    <StatusToken tone={STATE_TONE[state] ?? "neutral"} className={className}>
+      {INBOX_STATE_LABEL[state] ?? state}
+    </StatusToken>
+  )
 }
 
 /** Feature request that Featurama has not approved yet (hidden from users there). */
@@ -77,9 +99,4 @@ export function reviewReplyState(r: InboxReview): {
     return { tone: "info", label: "Antwort wartet auf Veröffentlichung" }
   if (r.reply) return { tone: "good", label: "beantwortet" }
   return { tone: "neutral", label: "ohne Antwort" }
-}
-
-export function ReviewReplyToken({ review }: { review: InboxReview }) {
-  const s = reviewReplyState(review)
-  return <StatusToken tone={s.tone}>{s.label}</StatusToken>
 }

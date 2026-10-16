@@ -1,4 +1,9 @@
-import { plural } from "@/components/app-inbox/labels"
+import {
+  activeCount,
+  inboxFilter,
+  isActiveState,
+  plural,
+} from "@/components/app-inbox/labels"
 import { ReviewList } from "@/components/app-inbox/review-list"
 import { load, projectScope } from "@/components/growth/server"
 import { ScopeLabel } from "@/components/growth/scope"
@@ -10,13 +15,13 @@ import type { AppInbox, InboxReview } from "@/lib/growth-types"
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Bewertungen" }
 
-/** Reviews that need a reply come first in the API order, so this cap never hides one. */
+/** Open reviews and proposals come first in the API order, so this cap never hides one. */
 const LIMIT = 1000
 
 const STORES = ["google_play", "app_store"] as const
 type StoreKey = (typeof STORES)[number]
 
-type Search = { filter?: string; store?: string }
+type Search = { filter?: string; store?: string; item?: string }
 
 export default async function ReviewsPage({
   searchParams,
@@ -35,24 +40,17 @@ export default async function ReviewsPage({
   const store: StoreKey | "all" = STORES.includes(sp.store as StoreKey)
     ? (sp.store as StoreKey)
     : "all"
-  const storeCounts =
-    store === "all"
-      ? { total: counts?.total ?? 0, needsReply: counts?.needsReply ?? 0 }
-      : (counts?.[store] ?? { total: 0, needsReply: 0 })
-  const filter =
-    sp.filter === "open" || sp.filter === "all"
-      ? sp.filter
-      : storeCounts.needsReply > 0
-        ? "open"
-        : "all"
   const all = (res.data?.items ?? []).filter(
     (i): i is InboxReview => i.type === "review"
   )
-  const rows = all.filter(
-    (r) =>
-      (store === "all" || r.store === store) &&
-      (filter === "all" || r.needsReply)
-  )
+  const inStore = all.filter((r) => store === "all" || r.store === store)
+  const storeCounts = store === "all" ? counts : counts?.[store]
+  const storeTotal = storeCounts?.total ?? 0
+  const activeTotal = activeCount(storeCounts?.byState, inStore)
+  const filter = inboxFilter(sp.filter)
+  const visible = inStore
+    .filter((r) => filter === "all" || isActiveState(r.state))
+    .map((r) => r.itemId)
   const projectNames = project
     ? null
     : Object.fromEntries(projects.map((p) => [p.id, p.name]))
@@ -64,7 +62,8 @@ export default async function ReviewsPage({
         title="Bewertungen"
         description={
           <ScopeLabel project={project} name={scope.name}>
-            Bewertungen mit Text aus Google Play und dem App Store.
+            Bewertungen mit Text aus Google Play und dem App Store. Ein Klick
+            öffnet Bewertung und Antwort.
           </ScopeLabel>
         }
       />
@@ -78,13 +77,13 @@ export default async function ReviewsPage({
                 param="filter"
                 value={filter}
                 params={params}
-                label="Antwortstatus"
+                label="Status"
                 options={[
                   {
                     value: "open",
-                    label: `Braucht Antwort (${storeCounts.needsReply})`,
+                    label: `Offen + Vorschlag (${activeTotal})`,
                   },
-                  { value: "all", label: `Alle (${storeCounts.total})` },
+                  { value: "all", label: `Alle (${storeTotal})` },
                 ]}
               />
               <UrlToggle
@@ -120,18 +119,21 @@ export default async function ReviewsPage({
               </p>
             ) : null}
           </div>
-          {rows.length === 0 ? (
+          {visible.length === 0 ? (
             <EmptyState
               title={filter === "open" ? "Nichts offen" : "Keine Bewertungen"}
               description={
                 filter === "open"
-                  ? "Alle Bewertungen mit Text sind beantwortet."
+                  ? "Keine Bewertung wartet auf eine Antwort oder einen Vorschlag."
                   : "Der Collector reviews liefert Bewertungen, sobald er für das Projekt eingeschaltet ist."
               }
             />
-          ) : (
-            <ReviewList items={rows} projectNames={projectNames} />
-          )}
+          ) : null}
+          <ReviewList
+            items={all}
+            visible={visible}
+            projectNames={projectNames}
+          />
         </>
       )}
     </div>

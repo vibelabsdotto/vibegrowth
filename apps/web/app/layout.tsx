@@ -10,6 +10,7 @@ import {
 import { Toaster } from "@/components/ui/toast"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { apiUrl, WEB_ACTOR } from "@/lib/api"
+import type { InboxStateCounts } from "@/lib/growth-types"
 import { selectedProject } from "@/lib/project-scope"
 import { cn } from "@/lib/utils"
 import "./globals.css"
@@ -38,32 +39,41 @@ async function navFetch<T>(path: string): Promise<T | null> {
   }
 }
 
+/** Items Max still has to act on: state open (no reply yet) or proposal (agent reply waits). */
+function actionable(byState: InboxStateCounts | undefined) {
+  return (byState?.open ?? 0) + (byState?.proposal ?? 0)
+}
+
 async function navData() {
-  const [projects, pending, inbox] = await Promise.all([
+  const [projects, chosen] = await Promise.all([
     navFetch<{ id: string; name: string; status?: string }[]>("/projects"),
-    navFetch<unknown[]>("/approvals?status=pending"),
-    navFetch<{
-      counts?: {
-        featureRequests?: { needsReply?: number }
-        reviews?: { needsReply?: number }
-      }
-    }>("/app/inbox?limit=1"),
+    selectedProject(),
   ])
   const list: SidebarProject[] = Array.isArray(projects)
     ? projects
         .filter((p) => p.status !== "archived")
         .map((p) => ({ id: p.id, name: p.name }))
     : []
-  const chosen = await selectedProject()
+  // A deleted or archived project falls back to "alle".
+  const selected = list.some((p) => p.id === chosen) ? chosen : ""
+  // Badges follow the project scope of the switcher, like the pages they link to.
+  const scope = selected ? `&project=${encodeURIComponent(selected)}` : ""
+  const [pending, inbox] = await Promise.all([
+    navFetch<unknown[]>(`/approvals?status=pending${scope}`),
+    navFetch<{
+      counts?: {
+        featureRequests?: { byState?: InboxStateCounts }
+        reviews?: { byState?: InboxStateCounts }
+      }
+    }>(`/app/inbox?limit=1${scope}`),
+  ])
   return {
     projects: list,
-    // A deleted or archived project falls back to "alle".
-    selected: list.some((p) => p.id === chosen) ? chosen : "",
-    // Badges count every project, like the approvals badge always did.
+    selected,
     counts: {
       pendingApprovals: Array.isArray(pending) ? pending.length : 0,
-      featureRequestsOpen: inbox?.counts?.featureRequests?.needsReply ?? 0,
-      reviewsOpen: inbox?.counts?.reviews?.needsReply ?? 0,
+      featureRequestsOpen: actionable(inbox?.counts?.featureRequests?.byState),
+      reviewsOpen: actionable(inbox?.counts?.reviews?.byState),
     },
     apiDown: projects === null,
   }

@@ -62,7 +62,11 @@ export function LinkedApprovals({
             className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs"
           >
             <Link
-              href={approvalsHref(a.status)}
+              href={
+                a.status === "pending"
+                  ? `/approvals?item=${a.id}`
+                  : approvalsHref(a.status)
+              }
               prefetch={false}
               className="min-w-0 font-medium break-words underline-offset-4 hover:underline"
             >

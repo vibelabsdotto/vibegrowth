@@ -56,9 +56,12 @@ type NavItem = {
 
 export type SidebarProject = { id: string; name: string }
 
+/** Badge numbers in the project scope of the switcher. */
 export type SidebarCounts = {
   pendingApprovals: number
+  /** inbox state open + proposal */
   featureRequestsOpen: number
+  /** inbox state open + proposal */
   reviewsOpen: number
 }
 
@@ -69,7 +72,6 @@ const web: NavItem[] = [
 ]
 
 const shortform: NavItem[] = [
-  { href: "/calendar", label: "Kalender", icon: CalendarDays },
   { href: "/posts", label: "Posts", icon: Clapperboard },
   { href: "/accounts", label: "Accounts", icon: Users },
   { href: "/hooks", label: "Hooks", icon: Quote },
@@ -107,6 +109,7 @@ export function AppSidebar({
       badge: counts.pendingApprovals,
     },
     { href: "/tasks", label: "Aufgaben", icon: ListTodo, also: ["/backlog"] },
+    { href: "/calendar", label: "Kalender", icon: CalendarDays },
     {
       href: "/experiments",
       label: "Experimente & Log",

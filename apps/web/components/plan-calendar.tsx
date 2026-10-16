@@ -20,6 +20,10 @@ import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import * as React from "react"
 import { moveEntry } from "@/app/actions"
+import {
+  ContentChip,
+  type CalendarContent,
+} from "@/components/calendar/content-chip"
 import { EntryDrawer, type EntryTarget } from "@/components/entry-drawer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -68,6 +72,12 @@ export type CalendarProps = {
   formats: Lite[]
   inspirations: InspoLite[]
   postsByEntry: Record<number, { id: number; label: string }>
+  /** Web content with a planned or live date (GET /calendar). */
+  content?: CalendarContent[]
+  /** Shortform plan visible (Bereich Alle or Shortform). */
+  showPlan?: boolean
+  /** Shown instead of the account filter, e.g. a project without shortform accounts. */
+  planNote?: React.ReactNode
 }
 
 const PRODUCED = new Set(["delivered", "posted"])
@@ -107,7 +117,7 @@ function EntryChip({
       aria-label={`${entry.topic}, ${PLAN_STATUS_LABEL[entry.status] ?? entry.status}${entry.locked ? ", gesperrt" : ""}`}
     >
       {accountName ? (
-        <span className="truncate text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        <span className="truncate text-[11px] font-medium text-muted-foreground">
           {accountName}
         </span>
       ) : null}
@@ -138,9 +148,7 @@ function PostChip({
       title="Gepostet, ohne Planeintrag"
     >
       {accountName ? (
-        <span className="truncate text-[10px] font-medium tracking-wide uppercase">
-          {accountName}
-        </span>
+        <span className="truncate text-[11px] font-medium">{accountName}</span>
       ) : null}
       <span className="line-clamp-2">{post.hook ?? post.slug}</span>
       <span className="flex items-center gap-1 text-[11px]">
@@ -161,7 +169,8 @@ function DayCell({
   id: string
   date: string
   today: string
-  onAdd: () => void
+  /** null: no plan to add to (no accounts or Bereich without shortform) */
+  onAdd: (() => void) | null
   children: React.ReactNode
   className?: string
 }) {
@@ -178,15 +187,17 @@ function DayCell({
       )}
     >
       {children}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="mt-auto self-end opacity-0 group-hover/cell:opacity-100 focus-visible:opacity-100"
-        aria-label={`Eintrag am ${dayMonth(date)} hinzufügen`}
-        onClick={onAdd}
-      >
-        <Plus aria-hidden="true" />
-      </Button>
+      {onAdd ? (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="mt-auto self-end opacity-0 group-hover/cell:opacity-100 focus-visible:opacity-100"
+          aria-label={`Eintrag am ${dayMonth(date)} hinzufügen`}
+          onClick={onAdd}
+        >
+          <Plus aria-hidden="true" />
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -229,7 +240,14 @@ export function PlanCalendar(p: CalendarProps) {
     () => Object.fromEntries(p.allAccounts.map((a) => [a.id, a.projectName])),
     [p.allAccounts]
   )
-  const visible = new Set(p.accounts.map((a) => a.id))
+  const showPlan = p.showPlan !== false
+  const planAccounts = showPlan ? p.accounts : []
+  const canPlan = showPlan && p.allAccounts.length > 0
+  const content = p.content ?? []
+  const contentBy = (date: string) => content.filter((c) => c.date === date)
+  // Own row in the week grid; always there when no plan rows are shown.
+  const contentRow = content.length > 0 || planAccounts.length === 0
+  const visible = new Set(planAccounts.map((a) => a.id))
   const shownEntries = entries.filter((e) => visible.has(e.accountId))
   const byCell = React.useMemo(() => {
     const m = new Map<string, PlanEntryRow[]>()
@@ -318,7 +336,35 @@ export function PlanCalendar(p: CalendarProps) {
             ) : null}
           </div>
         ))}
-        {p.accounts.map((a) => (
+        {contentRow ? (
+          <>
+            <div className="flex min-w-0 flex-col gap-1 border-t border-l p-2">
+              <span className="truncate text-sm font-medium">Content</span>
+              <span className="text-[11px] text-muted-foreground">
+                Web, geplant oder live
+              </span>
+            </div>
+            {week.map((d) => (
+              <div
+                key={d}
+                className={cn(
+                  "flex min-h-20 min-w-0 flex-col gap-1.5 border-t border-l p-1.5",
+                  d < p.today && "bg-muted/30",
+                  d === p.today && "bg-accent/40"
+                )}
+              >
+                {contentBy(d).map((c) => (
+                  <ContentChip
+                    key={c.id}
+                    item={c}
+                    showProject={p.showProject}
+                  />
+                ))}
+              </div>
+            ))}
+          </>
+        ) : null}
+        {planAccounts.map((a) => (
           <React.Fragment key={a.id}>
             <div className="flex min-w-0 flex-col gap-1 border-t border-l p-2">
               <Link
@@ -427,63 +473,68 @@ export function PlanCalendar(p: CalendarProps) {
               Monat
             </ToggleGroupItem>
           </ToggleGroup>
-          <Button size="sm" onClick={() => add(p.today, p.accounts[0]?.id)}>
-            <Plus data-icon="inline-start" aria-hidden="true" />
-            Eintrag hinzufügen
-          </Button>
+          {canPlan ? (
+            <Button size="sm" onClick={() => add(p.today, p.accounts[0]?.id)}>
+              <Plus data-icon="inline-start" aria-hidden="true" />
+              Eintrag hinzufügen
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <div
-        className="flex flex-wrap items-center gap-1.5"
-        role="group"
-        aria-label="Accounts filtern"
-      >
-        {p.allAccounts.map((a, i) => {
-          const on = visible.has(a.id)
-          const first =
-            p.showProject && p.allAccounts[i - 1]?.brandId !== a.brandId
-          return (
-            <React.Fragment key={a.id}>
-              {first ? (
-                <span
-                  className={cn(
-                    "text-xs font-medium text-muted-foreground",
-                    i > 0 && "ml-2"
-                  )}
+      {showPlan && p.planNote ? p.planNote : null}
+      {canPlan ? (
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label="Accounts filtern"
+        >
+          {p.allAccounts.map((a, i) => {
+            const on = visible.has(a.id)
+            const first =
+              p.showProject && p.allAccounts[i - 1]?.brandId !== a.brandId
+            return (
+              <React.Fragment key={a.id}>
+                {first ? (
+                  <span
+                    className={cn(
+                      "text-xs font-medium text-muted-foreground",
+                      i > 0 && "ml-2"
+                    )}
+                  >
+                    {a.projectName}:
+                  </span>
+                ) : null}
+                <Button
+                  size="xs"
+                  variant={on ? "secondary" : "ghost"}
+                  aria-pressed={on}
+                  aria-label={
+                    p.showProject ? `${a.name} (${a.projectName})` : undefined
+                  }
+                  className={cn(!on && "text-muted-foreground line-through")}
+                  onClick={() => {
+                    const current = p.accounts.map((x) => x.id)
+                    const next = on
+                      ? current.filter((x) => x !== a.id)
+                      : [...current, a.id]
+                    nav({
+                      accounts: next.join(",") || "none",
+                      for: p.scopeKey,
+                    })
+                  }}
                 >
-                  {a.projectName}:
-                </span>
-              ) : null}
-              <Button
-                size="xs"
-                variant={on ? "secondary" : "ghost"}
-                aria-pressed={on}
-                aria-label={
-                  p.showProject ? `${a.name} (${a.projectName})` : undefined
-                }
-                className={cn(!on && "text-muted-foreground line-through")}
-                onClick={() => {
-                  const current = p.accounts.map((x) => x.id)
-                  const next = on
-                    ? current.filter((x) => x !== a.id)
-                    : [...current, a.id]
-                  nav({
-                    accounts: next.join(",") || "none",
-                    for: p.scopeKey,
-                  })
-                }}
-              >
-                {a.name}
-              </Button>
-            </React.Fragment>
-          )
-        })}
-        <span className="ml-2 text-xs text-muted-foreground">
-          Dunkler Rahmen: von Max angelegt oder gesperrt · Grau: produziert ·
-          gestrichelt: Idee oder Post ohne Eintrag
-        </span>
-      </div>
+                  {a.name}
+                </Button>
+              </React.Fragment>
+            )
+          })}
+          <span className="ml-2 text-xs text-muted-foreground">
+            Dunkler Rahmen: von Max angelegt oder gesperrt · Grau: produziert ·
+            gestrichelt: Idee oder Post ohne Eintrag
+          </span>
+        </div>
+      ) : null}
 
       <DndContext id={dndId} sensors={sensors} onDragEnd={onDragEnd}>
         {p.view === "month" ? (
@@ -503,7 +554,7 @@ export function PlanCalendar(p: CalendarProps) {
                   id={`day|${d}`}
                   date={d}
                   today={p.today}
-                  onAdd={() => add(d)}
+                  onAdd={canPlan ? () => add(d) : null}
                   className={cn(
                     "min-h-32",
                     d.slice(0, 7) !== p.anchor.slice(0, 7) && "opacity-50"
@@ -517,6 +568,13 @@ export function PlanCalendar(p: CalendarProps) {
                   >
                     {d.slice(8, 10)}
                   </span>
+                  {contentBy(d).map((c) => (
+                    <ContentChip
+                      key={`c${c.id}`}
+                      item={c}
+                      showProject={p.showProject}
+                    />
+                  ))}
                   {(byDay.get(d) ?? []).map((e) => (
                     <EntryChip
                       key={e.id}
@@ -543,56 +601,58 @@ export function PlanCalendar(p: CalendarProps) {
         )}
       </DndContext>
 
-      <section className="flex flex-col gap-2" aria-labelledby="ideas-title">
-        <div className="flex items-center justify-between">
-          <h2 id="ideas-title" className="text-sm font-semibold">
-            Ideen-Pool{" "}
-            <span className="font-normal text-muted-foreground">
-              ({p.ideas.length})
-            </span>
-          </h2>
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => add(null, p.accounts[0]?.id)}
-          >
-            <Plus data-icon="inline-start" aria-hidden="true" />
-            Idee
-          </Button>
-        </div>
-        {p.ideas.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Keine Ideen ohne Datum. Der Agent füllt den Plan per „plan fill“ aus
-            diesem Pool.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {p.ideas.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                onClick={() => open(e)}
-                className="flex min-w-0 flex-col gap-1 rounded-md border border-dashed bg-card p-2 text-left text-xs hover:bg-accent"
-              >
-                <span className="flex items-center gap-1.5">
-                  <Badge variant="outline">
-                    {accountName[e.accountId]}
-                    {p.showProject && projectOf[e.accountId]
-                      ? ` · ${projectOf[e.accountId]}`
-                      : ""}
-                  </Badge>
-                  {e.angle ? (
-                    <span className="truncate text-muted-foreground">
-                      {e.angle}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="line-clamp-2 font-medium">{e.topic}</span>
-              </button>
-            ))}
+      {canPlan ? (
+        <section className="flex flex-col gap-2" aria-labelledby="ideas-title">
+          <div className="flex items-center justify-between">
+            <h2 id="ideas-title" className="text-sm font-semibold">
+              Ideen-Pool{" "}
+              <span className="font-normal text-muted-foreground">
+                ({p.ideas.length})
+              </span>
+            </h2>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => add(null, p.accounts[0]?.id)}
+            >
+              <Plus data-icon="inline-start" aria-hidden="true" />
+              Idee
+            </Button>
           </div>
-        )}
-      </section>
+          {p.ideas.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Keine Ideen ohne Datum. Der Agent füllt den Plan per „plan fill“
+              aus diesem Pool.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {p.ideas.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => open(e)}
+                  className="flex min-w-0 flex-col gap-1 rounded-md border border-dashed bg-card p-2 text-left text-xs hover:bg-accent"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Badge variant="outline">
+                      {accountName[e.accountId]}
+                      {p.showProject && projectOf[e.accountId]
+                        ? ` · ${projectOf[e.accountId]}`
+                        : ""}
+                    </Badge>
+                    {e.angle ? (
+                      <span className="truncate text-muted-foreground">
+                        {e.angle}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="line-clamp-2 font-medium">{e.topic}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <EntryDrawer
         target={target}

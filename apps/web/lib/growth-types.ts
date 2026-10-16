@@ -150,6 +150,10 @@ export type ReplyPayload = {
   lastSeen?: string | null
   text: string
   language?: string | null
+  /** 1–2 sentences: what happened */
+  summary?: string | null
+  /** optional next step, becomes a task on approve */
+  task?: TaskPayload | null
   editedBy?: string
   /** set by `app publish` */
   published?: { at: string; ref: string | null; verified?: boolean } | null
@@ -170,6 +174,23 @@ export type TaskPayload = {
   sources?: { type: string; id: string }[]
 }
 
+/** Payload of an approval with kind strategy (contract §7.10). */
+export type StrategyPayload = {
+  id?: string
+  category: string
+  name: string
+  summary?: string | null
+  guide?: string | null
+  skills?: string[]
+}
+
+/** One change caused by a decision (POST /approvals/:id/decide, /app/inbox/*). */
+export type ApprovalEffect = {
+  entity: string
+  id: string | number | null
+  change: string
+}
+
 export type ContentItem = {
   id: number
   projectId: string
@@ -183,6 +204,8 @@ export type ContentItem = {
   draftPath: string | null
   urlPath: string | null
   liveDate: string | null
+  /** YYYY-MM-DD, shown in the calendar */
+  plannedDate?: string | null
   approvalId: number | null
   notes: string | null
   position: number
@@ -399,11 +422,20 @@ export type InboxApproval = {
   publish: ReplyPayload["publish"]
 }
 
+/** Inbox item state (contract §7.8). */
+export type InboxState =
+  "open" | "proposal" | "approved" | "answered" | "no_reply" | "stale" | "error"
+
+export type InboxStateCounts = Partial<Record<InboxState, number>>
+
 type InboxBase = {
   target: "featurama" | "google_play" | "app_store" | string
   itemId: string
   projectRef: string | null
   lastSeen: string | null
+  state: InboxState
+  noReplyLastSeen?: string | null
+  noReplyAt?: string | null
   needsReply: boolean
   lastActivity: string | null
   approvals: InboxApproval[]
@@ -451,13 +483,27 @@ export type InboxItem = InboxFeatureRequest | InboxReview
 export type AppInbox = {
   project: string | null
   counts: {
-    featureRequests: { total: number; needsReply: number; pending: number }
+    featureRequests: {
+      total: number
+      needsReply: number
+      pending: number
+      byState?: InboxStateCounts
+    }
     reviews: {
       total: number
       needsReply: number
+      byState?: InboxStateCounts
       ratingsOnly: number
-      google_play?: { total: number; needsReply: number }
-      app_store?: { total: number; needsReply: number }
+      google_play?: {
+        total: number
+        needsReply: number
+        byState?: InboxStateCounts
+      }
+      app_store?: {
+        total: number
+        needsReply: number
+        byState?: InboxStateCounts
+      }
     }
   }
   items: InboxItem[]
@@ -499,6 +545,8 @@ export type KnowledgeItem = {
   scopeId: string | null
   /** project of the scope, null for global/growth */
   projectId: string | null
+  /** decisions with scope account: the account, else null */
+  accountId?: string | null
   category: string
   date: string
   actor: string
@@ -564,4 +612,43 @@ export type StoreSummary = {
     avgRating: number | null
     window: { count: number; avgRating: number | null }
   }
+}
+
+/** GET /calendar item: shortform plan entry or web content with a date. */
+export type CalendarItem =
+  | {
+      type: "plan_entry"
+      date: string
+      category: string
+      id: number
+      projectId: string | null
+      accountId: string
+      accountName: string | null
+      title: string | null
+      status: string
+      formatId: string | null
+      locked: boolean
+      origin: string
+    }
+  | {
+      type: "content"
+      date: string
+      category: string
+      id: number
+      projectId: string
+      title: string
+      dateKind: "planned" | "live"
+      kind: string
+      status: string
+      plannedDate: string | null
+      liveDate: string | null
+      urlPath: string | null
+      approvalId: number | null
+    }
+
+export type CalendarResponse = {
+  project: string | null
+  from: string
+  to: string
+  items: CalendarItem[]
 }

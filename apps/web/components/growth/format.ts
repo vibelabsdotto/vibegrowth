@@ -24,6 +24,7 @@ export const APPROVAL_KIND_LABEL: Record<string, string> = {
   draft: "Entwurf",
   store_text: "Store-Text",
   strategy: "Strategie",
+  content: "Content-Idee",
   reply: "Antwort",
   task: "Aufgabe",
   other: "Sonstiges",
@@ -324,4 +325,16 @@ export function localToday() {
   const d = new Date()
   const p = (n: number) => String(n).padStart(2, "0")
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** Titles repeat the kind ("Strategie: …"); the kind badge already says it. */
+export function shortTitle(title: string) {
+  return (
+    title
+      .replace(
+        /^(Strategie|Content-Idee|Antwort|Aufgabe|Store-Text|Blog-Thema)\s*:\s*/i,
+        ""
+      )
+      .trim() || title
+  )
 }
