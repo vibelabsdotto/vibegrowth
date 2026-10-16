@@ -28,6 +28,7 @@ const APPROVAL_KIND = [
   "hook",
   "format",
   "blog_topic",
+  "content",
   "draft",
   "store_text",
   "strategy",
@@ -531,7 +532,7 @@ export function registerGrowth(program: Command) {
     .option("--body-file <path>", "Body aus Datei, - für stdin")
     .option(
       "--payload <json>",
-      "strukturierter Vorschlag als JSON (Pflicht bei reply und task)"
+      "strukturierter Vorschlag als JSON (Pflicht bei reply, task und strategy)"
     )
     .option("--payload-file <path>", "Payload aus Datei, - für stdin")
     .option("--account <id>")
@@ -588,6 +589,10 @@ export function registerGrowth(program: Command) {
     .option("--approve")
     .option("--reject")
     .option("--changes", "Änderung erbeten")
+    .option(
+      "--no-reply",
+      "reply: Keine Antwort nötig (lehnt ab, bis neue Nutzeraktivität kommt)"
+    )
     .option("--note <text>")
     .option(
       "--text <text>",
@@ -605,14 +610,17 @@ export function registerGrowth(program: Command) {
             approve?: boolean
             reject?: boolean
             changes?: boolean
+            reply?: boolean
             note?: string
             text?: string
             textFile?: string
           }
         ) => {
+          // commander turns --no-reply into reply: false
+          const noReply = o.reply === false
           const picked = [
             o.approve && "approved",
-            o.reject && "rejected",
+            (o.reject || (noReply && !o.approve && !o.changes)) && "rejected",
             o.changes && "changes_requested",
           ].filter(Boolean)
           if (picked.length !== 1)
@@ -624,6 +632,7 @@ export function registerGrowth(program: Command) {
             decision: picked[0],
             note: o.note,
             text: textOrFile(o.text, o.textFile, "text"),
+            noReply: noReply || undefined,
           })
         }
       )
@@ -675,6 +684,7 @@ export function registerGrowth(program: Command) {
       .option("--draft-path <path>", "absoluter Pfad zum Entwurf")
       .option("--url-path <path>", "z. B. /blog/ueberstunden")
       .option("--live-date <date>")
+      .option("--planned-date <date>", 'geplanter Termin (Kalender), "" leert')
       .option("--approval <id>", "Freigabe", int)
       .option("--notes <text>")
       .option("--position <n>", "", int)
@@ -692,6 +702,7 @@ export function registerGrowth(program: Command) {
     draftPath?: string
     urlPath?: string
     liveDate?: string
+    plannedDate?: string
     approval?: number
     notes?: string
     position?: number
@@ -709,6 +720,7 @@ export function registerGrowth(program: Command) {
     draftPath: nullable(o.draftPath),
     urlPath: nullable(o.urlPath),
     liveDate: nullable(o.liveDate),
+    plannedDate: nullable(o.plannedDate),
     approvalId: o.approval,
     notes: nullable(o.notes),
     position: o.position,
@@ -1304,7 +1316,11 @@ export function registerGrowth(program: Command) {
     .description("Feature-Requests und Bewertungen mit Antwortstatus")
     .requiredOption("--project <id>")
     .addOption(choice("--type <type>", ["feature_request", "review"]))
-    .option("--needs-reply", "nur, was eine Antwort braucht")
+    .option("--needs-reply", "nur, was eine Antwort braucht (state open)")
+    .option(
+      "--state <list>",
+      "open, proposal, approved, answered, no_reply, stale, error, kommagetrennt"
+    )
     .option("--limit <n>", "Standard 200", int)
     .action(
       run(
@@ -1312,14 +1328,76 @@ export function registerGrowth(program: Command) {
           project: string
           type?: string
           needsReply?: boolean
+          state?: string
           limit?: number
         }) =>
           api.get("/app/inbox", {
             project: o.project,
             type: o.type,
             needsReply: o.needsReply,
+            state: o.state,
             limit: o.limit,
           })
+      )
+    )
+  appCmd
+    .command("reply")
+    .description(
+      "Eigene Antwort (nur max): freigegeben, geht mit dem nächsten app publish raus"
+    )
+    .requiredOption("--project <id>")
+    .addOption(
+      choice("--target <target>", [
+        "featurama",
+        "google_play",
+        "app_store",
+      ]).makeOptionMandatory()
+    )
+    .requiredOption("--item <id>", "Featurama-Request-ID bzw. Review-ID")
+    .option("--text <text>")
+    .option("--text-file <path>", "Text aus Datei, - für stdin")
+    .action(
+      run(
+        (o: {
+          project: string
+          target: string
+          item: string
+          text?: string
+          textFile?: string
+        }) => {
+          const text = textOrFile(o.text, o.textFile, "text")
+          if (!text)
+            throw new CliError("INVALID", "--text oder --text-file angeben")
+          return api.post("/app/inbox/reply", {
+            project: o.project,
+            target: o.target,
+            itemId: o.item,
+            text,
+          })
+        }
+      )
+    )
+  appCmd
+    .command("no-reply")
+    .description(
+      "Keine Antwort nötig (nur max), bis neue Nutzeraktivität kommt"
+    )
+    .requiredOption("--project <id>")
+    .addOption(
+      choice("--target <target>", [
+        "featurama",
+        "google_play",
+        "app_store",
+      ]).makeOptionMandatory()
+    )
+    .requiredOption("--item <id>", "Featurama-Request-ID bzw. Review-ID")
+    .action(
+      run((o: { project: string; target: string; item: string }) =>
+        api.post("/app/inbox/no-reply", {
+          project: o.project,
+          target: o.target,
+          itemId: o.item,
+        })
       )
     )
   appCmd
@@ -1338,6 +1416,32 @@ export function registerGrowth(program: Command) {
             true
           ),
         { partial: true }
+      )
+    )
+
+  program
+    .command("calendar")
+    .description(
+      "Alles mit Datum: Shortform-Plan und Content (geplant oder live)"
+    )
+    .option("--project <id>")
+    .option("--from <date>", "Standard: heute - 14 Tage")
+    .option("--to <date>", "Standard: from + 56 Tage")
+    .option("--category <list>", CATEGORY_HELP)
+    .action(
+      run(
+        (o: {
+          project?: string
+          from?: string
+          to?: string
+          category?: string
+        }) =>
+          api.get("/calendar", {
+            project: o.project,
+            from: o.from,
+            to: o.to,
+            category: o.category,
+          })
       )
     )
 

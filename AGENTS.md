@@ -18,7 +18,7 @@ Verbindlich: `docs/CONTRACT.md` (Endpunkte, Body-Feldnamen, Schema, CLI-Kompatib
 | `apps/api/src/core/category.ts` | Kategorien `web\|shortform\|app\|general` und ihre Ableitung (Kontrakt §7.9) |
 | `apps/api/src/growth/import/` | `import-growth` aus dem Website-Growth-System |
 | `apps/api/src/collectors/` | `definitions/` (ein Collector pro Datei), `sources/` (Abruf), `registry.ts` |
-| `apps/api/drizzle/` | SQL-Migrationen `0000`–`0006` + `meta/` |
+| `apps/api/drizzle/` | SQL-Migrationen `0000`–`0007` + `meta/` |
 | `apps/api/renderer/` | Python-Renderer, TikTok-Zahlen-Abruf, OFL-Fonts |
 | `apps/web/` | Next.js-App, Port 4310, nur über die API. Eigene Regeln in `apps/web/AGENTS.md` |
 | `apps/cli/` | Commander-CLI, HTTP-Client der API, gebündelt nach `dist/cli.mjs`; bins `vibegrowth` und Alias `vibeshorts` |

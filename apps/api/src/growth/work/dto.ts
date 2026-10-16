@@ -41,6 +41,21 @@ export class ApprovalDecideDto {
   @IsOptional() @IsString() note?: string | null
   /** Changed reply text (kind reply, with approve) */
   @IsOptional() @IsString() text?: string | null
+  /** kind reply with reject: "no reply needed" for the item's lastSeen */
+  @IsOptional() @IsBoolean() noReply?: boolean | null
+}
+
+export class InboxReplyDto {
+  @IsString() @IsNotEmpty() project!: string
+  @IsString() @IsNotEmpty() target!: string
+  @IsString() @IsNotEmpty() itemId!: string
+  @IsString() @IsNotEmpty() text!: string
+}
+
+export class InboxNoReplyDto {
+  @IsString() @IsNotEmpty() project!: string
+  @IsString() @IsNotEmpty() target!: string
+  @IsString() @IsNotEmpty() itemId!: string
 }
 
 // ---------- content ----------
@@ -56,6 +71,7 @@ export class ContentPatchDto {
   @IsOptional() @IsString() draftPath?: string | null
   @IsOptional() @IsString() urlPath?: string | null
   @IsOptional() @IsString() liveDate?: string | null
+  @IsOptional() @IsString() plannedDate?: string | null
   @IsOptional() @IsInt() approvalId?: number | null
   @IsOptional() @IsString() notes?: string | null
   @IsOptional() @IsInt() position?: number

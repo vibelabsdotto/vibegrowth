@@ -11,10 +11,21 @@ import {
   VGError,
 } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
-import { ApprovalsService } from "./approvals.service"
-import { oneOf, requireProject } from "./shared"
+import { ApprovalsService, noReplyActive } from "./approvals.service"
+import { listOf, oneOf, requireProject } from "./shared"
 
 export const INBOX_TYPES = ["feature_request", "review"] as const
+/** Reply state of an inbox item (contract §7.8), in sort order. */
+export const INBOX_STATES = [
+  "open",
+  "proposal",
+  "error",
+  "stale",
+  "approved",
+  "answered",
+  "no_reply",
+] as const
+export type InboxState = (typeof INBOX_STATES)[number]
 
 export type FeatureRequestDbRow = typeof featureRequests.$inferSelect
 
@@ -207,15 +218,62 @@ export class AppInboxService {
     return byItem
   }
 
+  /**
+   * State from the mirror and the newest reply approval: no_reply while lastSeen is unchanged,
+   * pending → proposal, approved and unpublished → approved (error/stale after a failed run;
+   * stale only while the item still needs a reply), else open or answered.
+   */
+  private state(
+    needs: boolean,
+    r: { noReplyAt: string | null; noReplyLastSeen: string | null },
+    lastSeen: string | null,
+    linked: LinkedApproval[]
+  ): InboxState {
+    if (noReplyActive({ ...r, lastSeen })) return "no_reply"
+    const reply = linked.find(
+      (a) =>
+        a.kind === "reply" &&
+        ["pending", "approved"].includes(a.status) &&
+        !a.published
+    )
+    if (reply?.status === "pending") return "proposal"
+    if (reply) {
+      const st = (reply.publish as { state?: string } | null)?.state
+      if (st === "error") return "error"
+      if (st === "stale") {
+        if (needs) return "stale"
+      } else return "approved"
+    }
+    return needs ? "open" : "answered"
+  }
+
+  /** POST /app/inbox/reply (max): own reply, goes out with the next app publish. */
+  reply(
+    input: { project: string; target: string; itemId: string; text: string },
+    actor: string
+  ) {
+    return this.approvalsService.ownReply(input, actor)
+  }
+
+  /** POST /app/inbox/no-reply (max): "no reply needed" until new user activity. */
+  noReply(
+    input: { project: string; target: string; itemId: string },
+    actor: string
+  ) {
+    return this.approvalsService.noReply(input, actor)
+  }
+
   inbox(f: {
     project?: string
     type?: string
     needsReply?: boolean
+    state?: string
     limit?: number
   }) {
     const ctx = this.ctx
     const project = f.project ? requireProject(ctx, f.project) : null
     const type = f.type ? oneOf(f.type, INBOX_TYPES, "type") : undefined
+    const states = listOf(f.state, INBOX_STATES, "state")
     const limit = f.limit ?? 200
     if (!Number.isInteger(limit) || limit < 1 || limit > 5000)
       throw new VGError("INVALID", `limit muss 1–5000 sein, war: ${limit}`)
@@ -254,15 +312,20 @@ export class AppInboxService {
       return refs.get(k)!
     }
 
-    const items: ({ needsReply: boolean; lastActivity: string } & Record<
-      string,
-      unknown
-    >)[] = []
+    const items: ({
+      needsReply: boolean
+      lastActivity: string
+      state: InboxState
+      type: string
+    } & Record<string, unknown>)[] = []
     if (type !== "review")
       for (const r of requests) {
-        // Featurama counts needsReply on approved requests; pending ones wait for approval there.
-        const needs = r.approved && r.needsReply
-        if (f.needsReply !== undefined && needs !== f.needsReply) continue
+        // Featurama counts needsReply on approved requests; pending ones wait for approval there
+        // (state open, needsReply false).
+        const linked =
+          links.get(`${r.projectId}|feature_request|${r.requestId}`) ?? []
+        const state = this.state(r.needsReply, r, r.lastUserCommentAt, linked)
+        const needs = state === "open" && r.approved
         items.push({
           type: "feature_request",
           target: "featurama",
@@ -270,20 +333,20 @@ export class AppInboxService {
           projectRef: r.featuramaProjectId,
           lastSeen: r.lastUserCommentAt,
           ...featureRequestOut(r),
+          state,
           needsReply: needs,
           lastActivity:
             [r.lastUserCommentAt, r.lastDeveloperCommentAt, r.requestedAt]
               .filter(Boolean)
               .sort()
               .pop() ?? r.createdAt,
-          approvals:
-            links.get(`${r.projectId}|feature_request|${r.requestId}`) ?? [],
+          approvals: linked,
         })
       }
     if (type !== "feature_request")
       for (const r of textReviews) {
-        if (f.needsReply !== undefined && r.needsReply !== f.needsReply)
-          continue
+        const linked = links.get(`${r.projectId}|review|${r.reviewId}`) ?? []
+        const state = this.state(r.needsReply, r, r.lastModified, linked)
         const store = r.store as "google_play" | "app_store"
         items.push({
           type: "review",
@@ -292,39 +355,55 @@ export class AppInboxService {
           projectRef: storeRef(r.projectId, store),
           lastSeen: r.lastModified,
           ...r,
+          state,
+          needsReply: state === "open",
           lastActivity:
             [r.lastModified, r.replyAt, r.date].filter(Boolean).sort().pop() ??
             r.createdAt,
-          approvals: links.get(`${r.projectId}|review|${r.reviewId}`) ?? [],
+          approvals: linked,
         })
       }
+    const rank = (s: InboxState) =>
+      Math.min(INBOX_STATES.indexOf(s), INBOX_STATES.indexOf("answered"))
     items.sort(
       (a, b) =>
         Number(b.needsReply) - Number(a.needsReply) ||
+        rank(a.state) - rank(b.state) ||
         b.lastActivity.localeCompare(a.lastActivity)
     )
-    const count = (list: { needsReply: boolean }[]) => ({
+    const byState = (list: { state: InboxState }[]) =>
+      Object.fromEntries(
+        INBOX_STATES.map((s) => [s, list.filter((i) => i.state === s).length])
+      )
+    const frItems = items.filter((i) => i.type === "feature_request")
+    const rvItems = items.filter((i) => i.type === "review")
+    const count = (list: { needsReply: boolean; state: InboxState }[]) => ({
       total: list.length,
       needsReply: list.filter((r) => r.needsReply).length,
+      byState: byState(list),
     })
+    const filtered = items.filter(
+      (i) =>
+        (f.needsReply === undefined || i.needsReply === f.needsReply) &&
+        (!states || (states as string[]).includes(i.state))
+    )
     return {
       project: project?.id ?? null,
       counts: {
         featureRequests: {
           total: requests.length,
-          needsReply: requests.filter((r) => r.approved && r.needsReply).length,
+          needsReply: frItems.filter((r) => r.needsReply).length,
           pending: requests.filter((r) => !r.approved).length,
+          byState: byState(frItems),
         },
         reviews: {
-          ...count(textReviews),
+          ...count(rvItems),
           ratingsOnly: reviews.length - textReviews.length,
-          google_play: count(
-            textReviews.filter((r) => r.store === "google_play")
-          ),
-          app_store: count(textReviews.filter((r) => r.store === "app_store")),
+          google_play: count(rvItems.filter((r) => r.target === "google_play")),
+          app_store: count(rvItems.filter((r) => r.target === "app_store")),
         },
       },
-      items: items.slice(0, limit),
+      items: filtered.slice(0, limit),
     }
   }
 }

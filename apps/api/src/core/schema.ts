@@ -652,6 +652,8 @@ export const contentItems = sqliteTable(
     sourceKey: text("source_key").unique(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    /** YYYY-MM-DD the item is planned to go live (calendar) */
+    plannedDate: text("planned_date"),
   },
   (t) => [index("content_items_project_status").on(t.projectId, t.status)]
 )
@@ -799,6 +801,9 @@ export const storeReviews = sqliteTable(
       .default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    /** "No reply needed" (max): lastSeen at that moment; active while it equals the current lastSeen. Collectors never write these. */
+    noReplyLastSeen: text("no_reply_last_seen"),
+    noReplyAt: text("no_reply_at"),
   },
   (t) => [
     uniqueIndex("store_reviews_project_store_review").on(
@@ -867,6 +872,9 @@ export const featureRequests = sqliteTable(
     url: text("url"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    /** "No reply needed" (max): lastSeen at that moment; active while it equals the current lastSeen. Collectors never write these. */
+    noReplyLastSeen: text("no_reply_last_seen"),
+    noReplyAt: text("no_reply_at"),
   },
   (t) => [
     uniqueIndex("feature_requests_project_request").on(

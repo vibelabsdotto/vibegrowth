@@ -65,7 +65,13 @@ function checkScope(
   scopeId: string | null | undefined
 ) {
   oneOf(scopeType, LEARNING_SCOPES, "scope")
-  if (scopeType === "global" || scopeType === "growth") return null
+  if (scopeType === "global") return null
+  // growth: optional project (required for decisions, see addDecision)
+  if (scopeType === "growth") {
+    if (!scopeId) return null
+    getById(ctx, brands, scopeId, "Projekt")
+    return scopeId
+  }
   if (!scopeId)
     throw new VSError(
       "INVALID",
@@ -310,6 +316,11 @@ export function addDecision(
   actor: string
 ) {
   const scopeId = checkScope(ctx, input.scopeType, input.scopeId)
+  if (input.scopeType === "growth" && !scopeId)
+    throw new VSError(
+      "INVALID",
+      "Growth-Entscheidungen gelten für ein Projekt (--growth --project <id>)"
+    )
   const category = categoryInput(input.category) ?? null
   oneOf(input.kind ?? "decision", ["decision", "pivot"] as const, "kind")
   if (!input.title?.trim())

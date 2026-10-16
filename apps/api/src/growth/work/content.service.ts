@@ -21,7 +21,9 @@ import {
   today,
   VGError,
 } from "../../core/util"
+import { isMax } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
+import { ApprovalsService } from "./approvals.service"
 import {
   checkChannel,
   daysBetween,
@@ -58,6 +60,7 @@ export interface ContentInput {
   draftPath?: string | null
   urlPath?: string | null
   liveDate?: string | null
+  plannedDate?: string | null
   approvalId?: number | null
   notes?: string | null
   position?: number
@@ -94,7 +97,10 @@ function cleanDraftPath(v: string | null | undefined) {
 
 @Injectable()
 export class ContentService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly approvalsService: ApprovalsService
+  ) {}
 
   private get ctx() {
     return this.database.ctx
@@ -310,6 +316,9 @@ export class ContentService {
           : status === "live"
             ? today()
             : null,
+        plannedDate: input.plannedDate
+          ? assertDate(input.plannedDate, "plannedDate")
+          : null,
         approvalId: input.approvalId
           ? getById(ctx, approvals, input.approvalId, "Freigabe").id
           : null,
@@ -327,6 +336,27 @@ export class ContentService {
         action: "create",
         after: row,
       })
+      // Agent ideas wait for max: open content approval (contract §7.5). Imports carry a sourceKey.
+      if (
+        status === "idea" &&
+        !isMax(actor) &&
+        !input.sourceKey &&
+        !row.approvalId
+      ) {
+        this.approvalsService.add(
+          {
+            projectId: project.id,
+            kind: "content",
+            title: title,
+            body: input.brief ?? null,
+            refType: "content",
+            refId: row.id,
+            category: contentCategory(row),
+          },
+          actor
+        )
+        return contentOut(getById(ctx, contentItems, row.id, "Content"))
+      }
       return contentOut(row)
     })
   }
@@ -354,6 +384,10 @@ export class ContentService {
       if (p.urlPath !== undefined) patch.urlPath = cleanUrlPath(p.urlPath)
       if (p.liveDate !== undefined)
         patch.liveDate = p.liveDate ? assertDate(p.liveDate, "liveDate") : null
+      if (p.plannedDate !== undefined)
+        patch.plannedDate = p.plannedDate
+          ? assertDate(p.plannedDate, "plannedDate")
+          : null
       if (p.approvalId !== undefined)
         patch.approvalId = p.approvalId
           ? getById(ctx, approvals, p.approvalId, "Freigabe").id

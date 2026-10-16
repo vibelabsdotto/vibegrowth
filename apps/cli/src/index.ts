@@ -891,6 +891,9 @@ function scopeFrom(o: {
   format?: string
   growth?: boolean
 }) {
+  // --growth with --project/--brand: growth scope of that project
+  if (o.growth && !o.account && !o.format)
+    return { scopeType: "growth", scopeId: o.brand ?? null }
   if (o.account) return { scopeType: "account", scopeId: o.account }
   if (o.brand) return { scopeType: "brand", scopeId: o.brand }
   if (o.format) return { scopeType: "format", scopeId: o.format }
@@ -982,7 +985,7 @@ projectAlias(
   .option("--format <id>")
   .option(
     "--growth",
-    "gilt für die Growth-Arbeit aller Projekte (nicht für Shorts)"
+    "Growth-Entscheidung eines Projekts (mit --project, nicht für Shorts)"
   )
   .option("--date <date>")
   .option("--supersedes <id>", "ersetzt Entscheidung", int)

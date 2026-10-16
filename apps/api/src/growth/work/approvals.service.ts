@@ -19,6 +19,7 @@ import {
   hooks,
   planEntries,
   storeReviews,
+  strategies,
 } from "../../core/schema"
 import {
   getById,
@@ -28,16 +29,19 @@ import {
   parseJson,
   patchRow,
   recordHistory,
+  slugify,
   VGError,
 } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
 import { BacklogService } from "./backlog.service"
 import { listOf, oneOf, optOneOf, requireProject } from "./shared"
+import { StrategiesService } from "./strategies.service"
 
 export const APPROVAL_KINDS = [
   "hook",
   "format",
   "blog_topic",
+  "content",
   "draft",
   "store_text",
   "strategy",
@@ -107,10 +111,53 @@ export interface ReplyPayload {
   lastSeen: string | null
   text: string
   language: string | null
+  /** 1–2 sentences: what happened (shown to max) */
+  summary?: string | null
+  /** optional next step: created as task on approve (same schema as kind task) */
+  task?: TaskPayload
   /** set by app publish */
   published?: { at: string; ref: string | null; verified: boolean }
   publish?: { state: "stale" | "error"; at: string; reason: string }
   [key: string]: unknown
+}
+
+export interface TaskPayload {
+  title: string
+  detail: string | null
+  kind: (typeof TASK_KINDS)[number]
+  impact: number
+  effort: number
+  sources: { type: string; id: string }[]
+}
+
+/** payload of kind strategy: becomes an active strategies row on approve. */
+export interface StrategyPayload {
+  id: string
+  category: "web" | "app" | "general"
+  name: string
+  summary: string
+  guide: string
+  skills: string[]
+}
+
+/** Mirror row of an inbox item (feature_requests or store_reviews). */
+export interface InboxItemRef {
+  entity: "feature_request" | "store_review"
+  rowId: number
+  title: string
+  lastSeen: string | null
+  projectRef: string | null
+  noReplyLastSeen: string | null
+  noReplyAt: string | null
+}
+
+/** "No reply needed" is active while the item's lastSeen still equals the stored one. */
+export function noReplyActive(r: {
+  noReplyAt: string | null
+  noReplyLastSeen: string | null
+  lastSeen: string | null
+}) {
+  return !!r.noReplyAt && (r.noReplyLastSeen ?? null) === (r.lastSeen ?? null)
 }
 
 export function approvalOut(a: ApprovalRow) {
@@ -152,7 +199,8 @@ function scale(v: unknown, field: string, fallback: number) {
 export class ApprovalsService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly backlog: BacklogService
+    private readonly backlog: BacklogService,
+    private readonly strategiesService: StrategiesService
   ) {}
 
   private get ctx() {
@@ -275,7 +323,8 @@ export class ApprovalsService {
       }
       let payload: Record<string, unknown> = input.payload ?? {}
       if (kind === "reply") payload = this.replyPayload(project.id, payload)
-      if (kind === "task") payload = this.taskPayload(payload, title)
+      if (kind === "task") payload = { ...this.taskPayload(payload, title) }
+      if (kind === "strategy") payload = { ...this.strategyPayload(payload) }
       const row = ctx.db
         .insert(approvals)
         .values({
@@ -291,7 +340,11 @@ export class ApprovalsService {
           requestedBy: actor,
           category:
             categoryInput(input.category) ??
-            (kind === "reply" || kind === "task" ? "app" : null),
+            (kind === "reply" || kind === "task"
+              ? "app"
+              : kind === "strategy"
+                ? (payload.category as string)
+                : null),
         })
         .returning()
         .get()
@@ -338,6 +391,8 @@ export class ApprovalsService {
           "lastSeen",
           "text",
           "language",
+          "summary",
+          "task",
         ].includes(k)
     )
     if (extra.length)
@@ -445,7 +500,322 @@ export class ApprovalsService {
         `Für ${target} ${itemId} gibt es schon eine offene Antwort (Freigabe ${open.id}, ${open.status})`
       )
     const language = str(p.language) ?? null
-    return { target, projectRef, itemId, lastSeen, text, language }
+    if (
+      p.summary !== undefined &&
+      p.summary !== null &&
+      typeof p.summary !== "string"
+    )
+      throw new VGError("INVALID", "payload.summary muss Text sein")
+    const out: ReplyPayload = {
+      target,
+      projectRef,
+      itemId,
+      lastSeen,
+      text,
+      language,
+    }
+    if (str(p.summary)) out.summary = str(p.summary)
+    if (p.task !== undefined && p.task !== null) {
+      if (typeof p.task !== "object" || Array.isArray(p.task))
+        throw new VGError("INVALID", "payload.task muss ein Objekt sein")
+      const t = p.task as Record<string, unknown>
+      if (!str(t.title))
+        throw new VGError("INVALID", "payload.task.title fehlt")
+      out.task = this.taskPayload(t, str(t.title)!, "payload.task")
+    }
+    return out
+  }
+
+  /** strategy payload: {id?, category (web|app|general), name, summary, guide, skills?}; id defaults to the slug of name. */
+  private strategyPayload(p: Record<string, unknown>): StrategyPayload {
+    const extra = Object.keys(p).filter(
+      (k) =>
+        !["id", "category", "name", "summary", "guide", "skills"].includes(k)
+    )
+    if (extra.length)
+      throw new VGError(
+        "INVALID",
+        `payload: unbekannte Felder für strategy: ${extra.join(", ")}`
+      )
+    const missing = ["category", "name", "summary", "guide"].filter(
+      (k) => !str(p[k])
+    )
+    if (missing.length)
+      throw new VGError(
+        "INVALID",
+        `payload für strategy braucht ${missing.map((k) => `payload.${k}`).join(", ")}`
+      )
+    const category = oneOf(
+      str(p.category)!,
+      ["web", "app", "general"] as const,
+      "payload.category"
+    )
+    const name = str(p.name)!
+    const id = str(p.id) ?? slugify(name)
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id))
+      throw new VGError(
+        "INVALID",
+        `payload.id muss klein mit Bindestrich sein (a-z, 0-9, -), war: ${id}`
+      )
+    if (
+      this.ctx.db
+        .select()
+        .from(strategies)
+        .where(eq(strategies.id, id))
+        .get() ||
+      this.ctx.db.select().from(formats).where(eq(formats.id, id)).get()
+    )
+      throw new VGError("CONFLICT", `Strategie oder Format ${id} gibt es schon`)
+    const skills = p.skills ?? []
+    if (!Array.isArray(skills) || skills.some((x) => typeof x !== "string"))
+      throw new VGError(
+        "INVALID",
+        "payload.skills muss eine Liste von Texten sein"
+      )
+    return {
+      id,
+      category,
+      name,
+      summary: str(p.summary)!,
+      guide: str(p.guide)!,
+      skills: (skills as string[]).map((x) => x.trim()).filter(Boolean),
+    }
+  }
+
+  /** Mirror row of an inbox item; NOT_FOUND when it was not collected. */
+  inboxItem(
+    projectId: string,
+    target: ReplyTarget,
+    itemId: string
+  ): InboxItemRef {
+    const ctx = this.ctx
+    if (target === "featurama") {
+      const fr = ctx.db
+        .select()
+        .from(featureRequests)
+        .where(
+          and(
+            eq(featureRequests.projectId, projectId),
+            eq(featureRequests.requestId, itemId)
+          )
+        )
+        .get()
+      if (!fr)
+        throw new VGError(
+          "NOT_FOUND",
+          `Feature-Request ${itemId} ist für ${projectId} nicht erfasst`
+        )
+      return {
+        entity: "feature_request",
+        rowId: fr.id,
+        title: fr.title,
+        lastSeen: fr.lastUserCommentAt,
+        projectRef: fr.featuramaProjectId,
+        noReplyLastSeen: fr.noReplyLastSeen,
+        noReplyAt: fr.noReplyAt,
+      }
+    }
+    const rv = ctx.db
+      .select()
+      .from(storeReviews)
+      .where(
+        and(
+          eq(storeReviews.projectId, projectId),
+          eq(storeReviews.store, target),
+          eq(storeReviews.reviewId, itemId)
+        )
+      )
+      .get()
+    if (!rv)
+      throw new VGError(
+        "NOT_FOUND",
+        `Bewertung ${itemId} (${target}) ist für ${projectId} nicht erfasst`
+      )
+    return {
+      entity: "store_review",
+      rowId: rv.id,
+      title: rv.title || (rv.body ?? "").slice(0, 60) || `Bewertung ${itemId}`,
+      lastSeen: rv.lastModified,
+      projectRef: this.storeRef(projectId, target),
+      noReplyLastSeen: rv.noReplyLastSeen,
+      noReplyAt: rv.noReplyAt,
+    }
+  }
+
+  /** Set or clear "no reply needed" on a mirror row (inside the caller's transaction). */
+  private setNoReply(
+    item: InboxItemRef,
+    lastSeen: string | null | undefined,
+    actor: string
+  ) {
+    const table =
+      item.entity === "feature_request" ? featureRequests : storeReviews
+    const patch =
+      lastSeen === undefined
+        ? { noReplyLastSeen: null, noReplyAt: null }
+        : { noReplyLastSeen: lastSeen, noReplyAt: nowIso() }
+    return patchRow(
+      this.ctx,
+      table,
+      item.entity,
+      item.rowId,
+      patch,
+      actor,
+      lastSeen === undefined ? "reopen" : "no_reply"
+    )
+  }
+
+  /** Pending reply approvals of one inbox item. */
+  private pendingReplies(projectId: string, target: string, itemId: string) {
+    return this.ctx.db
+      .select()
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.projectId, projectId),
+          eq(approvals.kind, "reply"),
+          eq(approvals.status, "pending")
+        )
+      )
+      .all()
+      .filter((a) => {
+        const q = parseJson<Partial<ReplyPayload>>(a.payload, {})
+        return q.target === target && q.itemId === itemId
+      })
+  }
+
+  private rejectAll(rows: ApprovalRow[], note: string, actor: string) {
+    return rows.map((r) => {
+      patchRow(
+        this.ctx,
+        approvals,
+        "approval",
+        r.id,
+        {
+          status: "rejected",
+          decidedBy: actor,
+          decidedAt: nowIso(),
+          decisionNote: note,
+        },
+        actor,
+        "decide"
+      )
+      return {
+        entity: "approval",
+        id: String(r.id),
+        change: `abgelehnt: ${note}`,
+      }
+    })
+  }
+
+  /**
+   * POST /app/inbox/reply (max only): max's own reply as an approved reply approval; app publish
+   * posts it. Pending agent proposals of the item are rejected, "no reply needed" is cleared.
+   */
+  ownReply(
+    input: { project: string; target: string; itemId: string; text: string },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    if (!isMax(actor))
+      throw new VGError(
+        "LOCKED",
+        `Eigene Antworten schreibt nur Max, nicht ${actor}`
+      )
+    return this.database.tx(() => {
+      const project = requireProject(ctx, input.project)
+      const target = oneOf(input.target ?? "", REPLY_TARGETS, "target")
+      const itemId = str(input.itemId)
+      if (!itemId) throw new VGError("INVALID", "itemId fehlt")
+      const item = this.inboxItem(project.id, target, itemId)
+      replyText(target, input.text, "text")
+      const effects = this.rejectAll(
+        this.pendingReplies(project.id, target, itemId),
+        "Max hat selbst geantwortet",
+        actor
+      )
+      const payload = this.replyPayload(project.id, {
+        target,
+        itemId,
+        text: input.text,
+      })
+      const at = nowIso()
+      const row = ctx.db
+        .insert(approvals)
+        .values({
+          projectId: project.id,
+          kind: "reply",
+          title: `Antwort von Max: ${item.title}`.slice(0, 200),
+          payload: json(payload),
+          status: "approved",
+          requestedBy: actor,
+          decidedBy: actor,
+          decidedAt: at,
+          category: "app",
+        })
+        .returning()
+        .get()
+      recordHistory(ctx, {
+        actor,
+        entity: "approval",
+        entityId: row.id,
+        action: "create",
+        after: { ...approvalOut(row) },
+      })
+      if (item.noReplyAt) {
+        this.setNoReply(item, undefined, actor)
+        effects.push({
+          entity: item.entity,
+          id: itemId,
+          change: "keine Antwort nötig aufgehoben",
+        })
+      }
+      return { ...approvalOut(row), effects }
+    })
+  }
+
+  /** POST /app/inbox/no-reply (max only): "no reply needed" for the current lastSeen; pending proposals are rejected. */
+  noReply(
+    input: { project: string; target: string; itemId: string },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    if (!isMax(actor))
+      throw new VGError(
+        "LOCKED",
+        `„Keine Antwort nötig“ setzt nur Max, nicht ${actor}`
+      )
+    return this.database.tx(() => {
+      const project = requireProject(ctx, input.project)
+      const target = oneOf(input.target ?? "", REPLY_TARGETS, "target")
+      const itemId = str(input.itemId)
+      if (!itemId) throw new VGError("INVALID", "itemId fehlt")
+      const item = this.inboxItem(project.id, target, itemId)
+      const effects = this.rejectAll(
+        this.pendingReplies(project.id, target, itemId),
+        "Keine Antwort nötig",
+        actor
+      )
+      const row = this.setNoReply(item, item.lastSeen, actor) as {
+        noReplyLastSeen: string | null
+        noReplyAt: string | null
+      }
+      effects.push({
+        entity: item.entity,
+        id: itemId,
+        change: "keine Antwort nötig",
+      })
+      return {
+        project: project.id,
+        target,
+        itemId,
+        state: "no_reply",
+        lastSeen: item.lastSeen,
+        noReplyLastSeen: row.noReplyLastSeen,
+        noReplyAt: row.noReplyAt,
+        effects,
+      }
+    })
   }
 
   /** Package (google_play) or app id (app_store) from the collector configs reviews, play, asc. */
@@ -466,10 +836,14 @@ export class ApprovalsService {
   }
 
   /** task payload: title, detail, kind (bug|feature|ux|store|other), impact, effort, sources [{type,id}]. */
-  private taskPayload(p: Record<string, unknown>, title: string) {
+  private taskPayload(
+    p: Record<string, unknown>,
+    title: string,
+    field = "payload"
+  ): TaskPayload {
     const sources = p.sources ?? []
     if (!Array.isArray(sources))
-      throw new VGError("INVALID", "payload.sources muss eine Liste sein")
+      throw new VGError("INVALID", `${field}.sources muss eine Liste sein`)
     const cleanSources = sources.map((s, i) => {
       const o = (s ?? {}) as Record<string, unknown>
       const type = str(o.type)
@@ -478,13 +852,13 @@ export class ApprovalsService {
       if (!type || !id)
         throw new VGError(
           "INVALID",
-          `payload.sources[${i}] braucht type und id`
+          `${field}.sources[${i}] braucht type und id`
         )
       return { type, id }
     })
     const detail = p.detail === undefined || p.detail === null ? null : p.detail
     if (detail !== null && typeof detail !== "string")
-      throw new VGError("INVALID", "payload.detail muss Text sein")
+      throw new VGError("INVALID", `${field}.detail muss Text sein`)
     const extra = Object.keys(p).filter(
       (k) =>
         !["title", "detail", "kind", "impact", "effort", "sources"].includes(k)
@@ -492,14 +866,14 @@ export class ApprovalsService {
     if (extra.length)
       throw new VGError(
         "INVALID",
-        `payload: unbekannte Felder für task: ${extra.join(", ")}`
+        `${field}: unbekannte Felder für task: ${extra.join(", ")}`
       )
     return {
       title: str(p.title) ?? title,
       detail,
-      kind: oneOf(str(p.kind) ?? "other", TASK_KINDS, "payload.kind"),
-      impact: scale(p.impact, "payload.impact", 2),
-      effort: scale(p.effort, "payload.effort", 2),
+      kind: oneOf(str(p.kind) ?? "other", TASK_KINDS, `${field}.kind`),
+      impact: scale(p.impact, `${field}.impact`, 2),
+      effort: scale(p.effort, `${field}.effort`, 2),
       sources: cleanSources,
     }
   }
@@ -526,7 +900,12 @@ export class ApprovalsService {
 
   decide(
     id: number,
-    input: { decision: string; note?: string | null; text?: string | null },
+    input: {
+      decision: string
+      note?: string | null
+      text?: string | null
+      noReply?: boolean | null
+    },
     actor: string
   ) {
     const ctx = this.ctx
@@ -548,11 +927,21 @@ export class ApprovalsService {
           "CONFLICT",
           `Freigabe ${id} ist nicht offen (Status ${a.status})`
         )
+      if (input.noReply) {
+        if (a.kind !== "reply")
+          throw new VGError(
+            "INVALID",
+            `noReply gibt es nur bei Freigaben der Art reply, Freigabe ${id} ist ${a.kind}`
+          )
+        if (status !== "rejected")
+          throw new VGError("INVALID", "noReply nur zusammen mit reject")
+      }
+      const note = input.note?.trim() || null
       const patch: Record<string, unknown> = {
         status,
         decidedBy: actor,
         decidedAt: nowIso(),
-        decisionNote: input.note?.trim() || null,
+        decisionNote: note,
       }
       if (input.text !== undefined && input.text !== null) {
         if (a.kind !== "reply")
@@ -571,15 +960,7 @@ export class ApprovalsService {
         if (text !== payload.text)
           patch.payload = json({ ...payload, text, editedBy: actor })
       }
-      const updated = patchRow(
-        ctx,
-        approvals,
-        "approval",
-        id,
-        patch,
-        actor,
-        "decide"
-      )
+      patchRow(ctx, approvals, "approval", id, patch, actor, "decide")
       const effects: { entity: string; id: string; change: string }[] = []
       if (patch.payload)
         effects.push({
@@ -587,87 +968,187 @@ export class ApprovalsService {
           id: String(id),
           change: "Antworttext geändert",
         })
-      if (status === "approved" && a.kind === "task") {
-        const t = parseJson<ReturnType<ApprovalsService["taskPayload"]>>(
-          a.payload,
-          {} as ReturnType<ApprovalsService["taskPayload"]>
-        )
-        const sourceKey = `approval:${id}`
-        const existing = ctx.db
-          .select()
-          .from(backlogItems)
-          .where(eq(backlogItems.sourceKey, sourceKey))
-          .get()
-        const item =
-          existing ??
-          this.backlog.add(
-            {
-              projectId: a.projectId,
-              title: t.title || a.title,
-              detail: t.detail ?? a.body ?? null,
-              kind: t.kind ?? "other",
-              impact: t.impact ?? 2,
-              effort: t.effort ?? 2,
-              source: [
-                `Freigabe ${id}`,
-                ...(t.sources ?? []).map((s) => `${s.type} ${s.id}`),
-              ].join(", "),
-              category: "app",
-              sourceKey,
-            },
-            actor
-          )
-        patchRow(
-          ctx,
-          approvals,
-          "approval",
-          id,
-          { refType: "backlog", refId: String(item.id) },
+      const payload = parseJson<Record<string, unknown>>(a.payload, {})
+
+      if (status === "approved" && a.kind === "task")
+        this.createTask(a, payload, effects, actor, true)
+      if (status === "approved" && a.kind === "reply" && payload.task)
+        this.createTask(a, payload.task, effects, actor, !a.refType)
+      if (status === "approved" && a.kind === "strategy" && str(payload.name)) {
+        const p = payload as unknown as StrategyPayload
+        const row = this.strategiesService.add(
+          {
+            id: p.id,
+            projectId: a.projectId,
+            category: p.category,
+            name: p.name,
+            summary: p.summary ?? null,
+            guide: p.guide ?? null,
+            skills: p.skills ?? [],
+            status: "active",
+            source: `Freigabe #${id}`,
+          },
           actor
         )
         effects.push({
-          entity: "backlog",
-          id: String(item.id),
-          change: existing ? "Aufgabe verknüpft" : "Aufgabe angelegt",
+          entity: "strategy",
+          id: row.id,
+          change: "Strategie aktiv angelegt",
         })
-        return {
-          ...approvalOut(getById(ctx, approvals, id, "Freigabe")),
-          effects,
-        }
       }
-      if (status === "approved" && a.refType && a.refId) {
-        if (a.refType === "content") {
-          const item = getById(ctx, contentItems, Number(a.refId), "Content")
-          const patch: Record<string, unknown> = {}
-          if (item.status === "idea") patch.status = "approved"
-          if (!item.approvalId) patch.approvalId = id
-          if (Object.keys(patch).length) {
-            patchRow(ctx, contentItems, "content", item.id, patch, actor)
-            if (patch.status)
-              effects.push({
-                entity: "content",
-                id: String(item.id),
-                change: "status idea → approved",
-              })
-          }
-        } else if (a.refType === "plan_entry") {
-          const entry = getById(
-            ctx,
-            planEntries,
-            Number(a.refId),
-            "Planeintrag"
-          )
-          if (!entry.locked) {
-            lockEntry(ctx, entry.id, true, actor)
+      if (status === "rejected" && a.kind === "reply" && input.noReply) {
+        const p = payload as unknown as ReplyPayload
+        const item = this.inboxItem(a.projectId, p.target, p.itemId)
+        this.setNoReply(item, p.lastSeen ?? null, actor)
+        effects.push({
+          entity: item.entity,
+          id: p.itemId,
+          change: "keine Antwort nötig",
+        })
+      }
+
+      if (
+        a.refType === "content" &&
+        a.refId &&
+        status !== "changes_requested"
+      ) {
+        const item = getById(ctx, contentItems, Number(a.refId), "Content")
+        const cpatch: Record<string, unknown> = {}
+        if (!item.approvalId) cpatch.approvalId = id
+        if (status === "approved" && item.status === "idea")
+          cpatch.status = "approved"
+        if (
+          status === "rejected" &&
+          (a.kind === "content" || a.kind === "blog_topic") &&
+          !["live", "discarded"].includes(item.status)
+        )
+          cpatch.status = "discarded"
+        if (Object.keys(cpatch).length) {
+          patchRow(ctx, contentItems, "content", item.id, cpatch, actor)
+          if (cpatch.status)
             effects.push({
-              entity: "plan_entry",
-              id: String(entry.id),
-              change: "locked",
+              entity: "content",
+              id: String(item.id),
+              change: `status ${item.status} → ${cpatch.status as string}`,
             })
+          else
+            effects.push({
+              entity: "content",
+              id: String(item.id),
+              change: `Freigabe #${id} verknüpft`,
+            })
+        }
+      } else if (
+        a.refType === "plan_entry" &&
+        a.refId &&
+        status === "approved"
+      ) {
+        const entry = getById(ctx, planEntries, Number(a.refId), "Planeintrag")
+        if (!entry.locked) {
+          lockEntry(ctx, entry.id, true, actor)
+          effects.push({
+            entity: "plan_entry",
+            id: String(entry.id),
+            change: "locked",
+          })
+        }
+      } else if (
+        a.refType === "backlog" &&
+        a.refId &&
+        a.kind !== "task" &&
+        status !== "changes_requested"
+      ) {
+        const item = getById(
+          ctx,
+          backlogItems,
+          Number(a.refId),
+          "Backlog-Eintrag"
+        )
+        if (status === "approved") {
+          const tag = `Freigabe #${id} bestätigt`
+          const bpatch: Record<string, unknown> = {
+            source: item.source ? `${item.source}, ${tag}` : tag,
           }
+          if (note)
+            bpatch.detail = `${item.detail ? `${item.detail}\n\n` : ""}Max (Freigabe #${id}): ${note}`
+          patchRow(ctx, backlogItems, "backlog", item.id, bpatch, actor)
+          effects.push({
+            entity: "backlog",
+            id: String(item.id),
+            change: note ? `${tag}, Auftrag in detail` : tag,
+          })
+        } else if (!["done", "dropped"].includes(item.status)) {
+          patchRow(
+            ctx,
+            backlogItems,
+            "backlog",
+            item.id,
+            { status: "dropped" },
+            actor
+          )
+          effects.push({
+            entity: "backlog",
+            id: String(item.id),
+            change: `status ${item.status} → dropped`,
+          })
         }
       }
-      return { ...approvalOut(updated), effects }
+      return {
+        ...approvalOut(getById(ctx, approvals, id, "Freigabe")),
+        effects,
+      }
+    })
+  }
+
+  /** Task from an approved task (or reply payload.task): backlog item with source_key approval:<id>. */
+  private createTask(
+    a: ApprovalRow,
+    t: Partial<TaskPayload>,
+    effects: { entity: string; id: string; change: string }[],
+    actor: string,
+    link: boolean
+  ) {
+    const ctx = this.ctx
+    const sourceKey = `approval:${a.id}`
+    const existing = ctx.db
+      .select()
+      .from(backlogItems)
+      .where(eq(backlogItems.sourceKey, sourceKey))
+      .get()
+    const p = parseJson<Partial<ReplyPayload>>(a.payload, {})
+    const sources = [
+      ...(a.kind === "reply" ? [`${p.target} ${p.itemId}`] : []),
+      ...(t.sources ?? []).map((s) => `${s.type} ${s.id}`),
+    ]
+    const item =
+      existing ??
+      this.backlog.add(
+        {
+          projectId: a.projectId,
+          title: t.title || a.title,
+          detail: t.detail ?? (a.kind === "task" ? a.body : null) ?? null,
+          kind: t.kind ?? "other",
+          impact: t.impact ?? 2,
+          effort: t.effort ?? 2,
+          source: [`Freigabe ${a.id}`, ...sources].join(", "),
+          category: "app",
+          sourceKey,
+        },
+        actor
+      )
+    if (link)
+      patchRow(
+        ctx,
+        approvals,
+        "approval",
+        a.id,
+        { refType: "backlog", refId: String(item.id) },
+        actor
+      )
+    effects.push({
+      entity: "backlog",
+      id: String(item.id),
+      change: existing ? "Aufgabe verknüpft" : "Aufgabe angelegt",
     })
   }
 

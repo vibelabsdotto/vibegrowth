@@ -43,7 +43,7 @@ export class KnowledgeService {
     )
     return (scopeType: string, scopeId: string | null): string | null => {
       if (!scopeId) return null
-      if (scopeType === "brand") return scopeId
+      if (scopeType === "brand" || scopeType === "growth") return scopeId
       if (scopeType === "account") return acc.get(scopeId) ?? null
       if (scopeType === "format") return fmt.get(scopeId) ?? null
       return null
@@ -91,18 +91,22 @@ export class KnowledgeService {
           category: knowledgeCategory(l),
         })
       }
+    // Decisions are always project related (brand/growth with the project as scope_id, accounts
+    // of the project); global ones stay for shorts and context --account but are not shown here.
     if (type !== "learning")
       for (const d of ctx.db
         .select()
         .from(decisions)
         .orderBy(desc(decisions.date), desc(decisions.id))
         .all()) {
+        if (!["brand", "growth", "account"].includes(d.scopeType)) continue
         const projectId = projectOf(d.scopeType, d.scopeId)
-        if (!inProject(d.scopeType, projectId)) continue
+        if (!projectId || (f.project && projectId !== f.project)) continue
         out.push({
           type: "decision",
           ...d,
           projectId,
+          accountId: d.scopeType === "account" ? d.scopeId : null,
           category: knowledgeCategory(d),
         })
       }
@@ -149,6 +153,12 @@ export class KnowledgeService {
             }
           : {}),
         projectId: this.projectResolver()(updated.scopeType, updated.scopeId),
+        ...(t === "decision"
+          ? {
+              accountId:
+                updated.scopeType === "account" ? updated.scopeId : null,
+            }
+          : {}),
         category: knowledgeCategory(updated),
       }
     })

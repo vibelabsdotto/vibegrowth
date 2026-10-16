@@ -3,6 +3,7 @@ import { AppInboxService } from "./app-inbox.service"
 import { AppPublishService } from "./app-publish.service"
 import { ApprovalsService } from "./approvals.service"
 import { BacklogService } from "./backlog.service"
+import { CalendarService } from "./calendar.service"
 import { ChangesService } from "./changes.service"
 import { ContentService } from "./content.service"
 import { DataBridge } from "./data-bridge"
@@ -17,6 +18,7 @@ import {
   AppController,
   ApprovalsController,
   BacklogController,
+  CalendarController,
   ChangesController,
   ContentController,
   ExperimentsController,
@@ -46,6 +48,7 @@ import {
     StrategiesController,
     KnowledgeController,
     AppController,
+    CalendarController,
     OverviewController,
   ],
   providers: [
@@ -63,6 +66,7 @@ import {
     KnowledgeService,
     AppInboxService,
     AppPublishService,
+    CalendarService,
   ],
   exports: [
     ApprovalsService,

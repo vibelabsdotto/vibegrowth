@@ -50,6 +50,13 @@
       "when": 1792109320660,
       "tag": "0006_categories_strategies_app_inbox",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792149508661,
+      "tag": "0007_no_reply_planned_date",
+      "breakpoints": true
     }
   ]
 }

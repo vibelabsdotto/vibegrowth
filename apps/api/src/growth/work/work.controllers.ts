@@ -14,6 +14,7 @@ import { AppInboxService } from "./app-inbox.service"
 import { AppPublishService } from "./app-publish.service"
 import { ApprovalsService } from "./approvals.service"
 import { BacklogService } from "./backlog.service"
+import { CalendarService } from "./calendar.service"
 import { ChangesService } from "./changes.service"
 import { ContentService } from "./content.service"
 import {
@@ -31,6 +32,8 @@ import {
   GeoQuestionCreateDto,
   AppPublishDto,
   GeoQuestionPatchDto,
+  InboxNoReplyDto,
+  InboxReplyDto,
   KnowledgePatchDto,
   MentionPatchDto,
   StrategyCreateDto,
@@ -425,11 +428,13 @@ export class AppController {
     @Query("project") project?: string,
     @Query("type") type?: string,
     @Query("needsReply") needsReply?: string,
-    @Query("limit") limit?: string
+    @Query("limit") limit?: string,
+    @Query("state") state?: string
   ) {
     return this.inbox.inbox({
       project,
       type,
+      state,
       needsReply:
         needsReply === undefined || needsReply === ""
           ? undefined
@@ -438,10 +443,37 @@ export class AppController {
     })
   }
 
+  @Post("inbox/reply")
+  reply(@Body() body: InboxReplyDto, @Actor() actor: string) {
+    return this.inbox.reply(body, actor)
+  }
+
+  @Post("inbox/no-reply")
+  @HttpCode(200)
+  noReply(@Body() body: InboxNoReplyDto, @Actor() actor: string) {
+    return this.inbox.noReply(body, actor)
+  }
+
   @Post("publish")
   @HttpCode(200)
   publish(@Body() body: AppPublishDto, @Actor() actor: string) {
     return this.publisher.publish(body, actor)
+  }
+}
+
+/** Shortform plan and dated content in one list (the shorts plan routes stay unchanged). */
+@Controller("calendar")
+export class CalendarController {
+  constructor(private readonly calendarService: CalendarService) {}
+
+  @Get()
+  calendar(
+    @Query("project") project?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("category") category?: string
+  ) {
+    return this.calendarService.calendar({ project, from, to, category })
   }
 }
 
