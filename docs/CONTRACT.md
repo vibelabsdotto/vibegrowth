@@ -146,7 +146,7 @@ Query-Parameter für Filter, JSON-Body für Schreibvorgänge mit den camelCase-F
 | `hook list\|add\|winner\|variant` | `GET /hooks?account=&winners=`, `POST /hooks`, `POST /hooks/:id/winner {winner}`, `POST /hooks/:id/variants` | knowledge |
 | `inspo list\|show\|add\|update` | `GET /inspo?…`, `GET /inspo/:id`, `POST /inspo`, `PATCH /inspo/:id` | knowledge |
 | `history` | `GET /history?entity=&id=&by=&limit=` | `listHistory` |
-| `render --post …` | `POST /render {post, video, finalize?}` | `renderPost` |
+| `render --post …` | `POST /render {post, video, finalize?}` | `renderPost`; unregistrierter Post-Ordner wird vorher registriert, Foto-Posts (`photo-mode`) bekommen das Upload-ZIP, Antwort dann mit `zip` |
 | `open <kind> <id>` | `POST /open {kind, id}` | `openPath`/`folderFor` |
 
 Nur für die Web-App (kein CLI-Befehl): `PATCH /plan/:id` mit `locked`, `POST /accounts` mit `newCharacter`, `PATCH /posts/:idOrDir`, `POST /learnings/:id/status` (siehe `docs/api-shorts.md`).

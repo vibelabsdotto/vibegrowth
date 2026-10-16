@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { resolveInDataDir, toolConfig } from "./config"
 import { appRoot, type Ctx } from "./db"
-import { getAccount, getFormat } from "./catalog"
+import { getAccount, getFormat, listAccounts } from "./catalog"
 import { getInspiration } from "./knowledge"
 import { getPost, registerPost } from "./posts"
 import { planEntries } from "./schema"
@@ -82,7 +82,7 @@ export function renderPost(
   opts: { video?: boolean; finalize?: { stem: string; zip: string } },
   actor: string
 ) {
-  const post = getPost(ctx, idOrDir)
+  const post = resolveOrRegister(ctx, idOrDir, actor)
   const abs = resolveInDataDir(ctx.config.dataDir, post.dir)
   const manifestPath = path.join(abs, "render-manifest.json")
   if (!fs.existsSync(manifestPath))
@@ -90,6 +90,7 @@ export function renderPost(
   const { python } = toolConfig()
   const scripts = path.join(appRoot(), "renderer", "scripts")
   let res
+  let photoMode = false
   if (opts.finalize) {
     res = spawnSync(
       python,
@@ -120,6 +121,7 @@ export function renderPost(
       JSON.parse(fs.readFileSync(manifestPath, "utf8")),
       params
     )
+    photoMode = merged.format === "photo-mode"
     const tmp = path.join(
       fs.mkdtempSync(path.join(os.tmpdir(), "vibegrowth-")),
       "manifest.json"
@@ -157,10 +159,67 @@ export function renderPost(
   } catch {
     // renderer printed non-JSON; keep raw text
   }
+  // Photo-mode posts are uploaded as a carousel: build the upload ZIP right away,
+  // same layout as before (slides/NN.jpg, caption.txt, upload-readme.txt).
+  let zip: unknown
+  if (photoMode) {
+    const zipped = spawnSync(
+      python,
+      [
+        path.join(scripts, "package_photo_mode.py"),
+        "--post",
+        abs,
+        "--zip",
+        `${post.accountId}-photo-mode.zip`,
+      ],
+      { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }
+    )
+    const zipOut = `${zipped.stdout ?? ""}${zipped.stderr ?? ""}`.trim()
+    if (zipped.status !== 0)
+      throw new VSError(
+        "EXTERNAL",
+        `Upload-ZIP fehlgeschlagen (${zipped.status}): ${zipOut.slice(-1500)}`
+      )
+    try {
+      zip = JSON.parse(zipped.stdout.trim())
+    } catch {
+      zip = zipOut
+    }
+  }
   const refreshed = registerPost(
     ctx,
     { accountId: post.accountId, dir: post.dir },
     actor
   )
-  return { post: refreshed, renderer: report }
+  return zip === undefined
+    ? { post: refreshed, renderer: report }
+    : { post: refreshed, renderer: report, zip }
+}
+
+/**
+ * A post folder that is not registered yet is registered (not delivered) before
+ * rendering, if it lies inside exactly one account folder. Rendering comes before
+ * `post register --delivered` in the daily run.
+ */
+function resolveOrRegister(ctx: Ctx, idOrDir: string, actor: string) {
+  try {
+    return getPost(ctx, idOrDir)
+  } catch (error) {
+    if (!(error instanceof VSError) || error.code !== "NOT_FOUND") throw error
+    if (/^\d+$/.test(idOrDir) || !idOrDir.includes("/")) throw error
+    const rel = (
+      path.isAbsolute(idOrDir)
+        ? path.relative(ctx.config.dataDir, idOrDir)
+        : idOrDir
+    ).replace(/\/$/, "")
+    const owners = listAccounts(ctx, {}).filter((a) =>
+      rel.startsWith(`${a.dir}/posts/`)
+    )
+    if (owners.length !== 1) throw error
+    const abs = resolveInDataDir(ctx.config.dataDir, rel)
+    // Unknown folders keep the old NOT_FOUND text; only real post folders register.
+    if (!fs.existsSync(path.join(abs, "render-manifest.json"))) throw error
+    registerPost(ctx, { accountId: owners[0]!.id, dir: rel }, actor)
+    return getPost(ctx, rel)
+  }
 }

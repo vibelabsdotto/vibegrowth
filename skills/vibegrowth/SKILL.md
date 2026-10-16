@@ -20,7 +20,7 @@ Die CLI spricht per HTTP mit der lokalen VibeGrowth-API (`VIBEGROWTH_API_URL`, S
    - `format.guide` ist der Leitfaden als Markdown (Slide-Aufbau, Produktion, Abnahme), `format.skills` die Werkzeug-Skills, die vor der Produktion zu laden sind, `format.examples` bestätigte Beispielposts relativ zum Datenordner.
 3. Thema: `today` nehmen. Ist `today` leer, selbst wählen und vor der Produktion mit `plan add --account <id> --date <heute> --topic … --rationale …` eintragen. Status während der Arbeit: `plan update <id> --status in_production`.
 4. Skills aus `format.skills` laden, Post nach `format.guide`, Regeln und CTA-Regel bauen. Jedes generierte Bild gegen `imageErrors` prüfen.
-5. `vibegrowth render --post <ordner>` (oder `--finalize <stem> --zip <name>.zip` für Canvas-Posts).
+5. `vibegrowth render --post <ordner>` (oder `--finalize <stem> --zip <name>.zip` für Canvas-Posts). Ein noch nicht registrierter Ordner im Account-Ordner wird dabei automatisch registriert (noch nicht geliefert). Bei Foto-Posts (`format: "photo-mode"` im Manifest) legt `render` das Upload-ZIP `<account>-photo-mode.zip` selbst an (`slides/NN.jpg`, `caption.txt`, `upload-readme.txt`); die Antwort nennt es unter `zip`. Nicht von Hand packen.
 6. `vibegrowth post register --account <id> --dir <ordner> --delivered`. Verknüpft den Eintrag des Tages und setzt ihn auf „geliefert“.
 7. Learnings nur mit Beleg: `learning add --account <id> --statement … --evidence "<Posts und Zahlen>"`.
 8. Horizont halten: `plan horizon --account <id>`; freie Tage mit `plan fill --account <id> --weeks 3 --file <json>` füllen (Liste von `{topic, angle, hookDirection, hook, rationale}`). Ohne `--file` plant `fill` aus dem eigenen Ideen-Pool.
