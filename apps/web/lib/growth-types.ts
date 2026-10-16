@@ -136,8 +136,38 @@ export type Approval = {
   decidedBy: string | null
   decidedAt: string | null
   decisionNote: string | null
+  /** stored or derived (contract §7.9) */
+  category?: string
   createdAt: string
   updatedAt?: string
+}
+
+/** Payload of an approval with kind reply (contract §7.8). */
+export type ReplyPayload = {
+  target: "featurama" | "google_play" | "app_store" | string
+  projectRef?: string
+  itemId: string
+  lastSeen?: string | null
+  text: string
+  language?: string | null
+  editedBy?: string
+  /** set by `app publish` */
+  published?: { at: string; ref: string | null; verified?: boolean } | null
+  publish?: {
+    state: "stale" | "error" | string
+    at: string
+    reason: string
+  } | null
+}
+
+/** Payload of an approval with kind task (contract §7.8). */
+export type TaskPayload = {
+  title?: string
+  detail?: string | null
+  kind?: string
+  impact?: number
+  effort?: number
+  sources?: { type: string; id: string }[]
 }
 
 export type ContentItem = {
@@ -157,6 +187,7 @@ export type ContentItem = {
   notes: string | null
   position: number
   actor: string
+  category?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -212,8 +243,10 @@ export type BacklogItem = {
   status: string
   source: string | null
   doneRef: string | null
+  notionUrl?: string | null
   position: number
   actor: string
+  category?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -228,6 +261,7 @@ export type Change = {
   ref: string | null
   experimentId: number | null
   actor: string
+  category?: string
 }
 
 export type ExperimentWindow = {
@@ -266,6 +300,7 @@ export type Experiment = {
   result: ExperimentResult | null
   verdict: string | null
   actor: string
+  category?: string
   createdAt?: string
   windows?: {
     baseline: { from: string; to: string }
@@ -348,6 +383,138 @@ export type StoreReview = {
   language: string | null
   version: string | null
   reply: string | null
+  lastModified?: string | null
+  replyAt?: string | null
+  replyState?: string | null
+  needsReply?: boolean
+}
+
+/** Approval linked to an inbox item (GET /app/inbox, items[].approvals). */
+export type InboxApproval = {
+  id: number
+  kind: string
+  status: string
+  title: string
+  published: ReplyPayload["published"]
+  publish: ReplyPayload["publish"]
+}
+
+type InboxBase = {
+  target: "featurama" | "google_play" | "app_store" | string
+  itemId: string
+  projectRef: string | null
+  lastSeen: string | null
+  needsReply: boolean
+  lastActivity: string | null
+  approvals: InboxApproval[]
+  id: number
+  projectId: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type FeatureRequestComment = {
+  id: string
+  role: "user" | "developer" | string
+  author: string | null
+  content: string
+  createdAt: string
+}
+
+export type InboxFeatureRequest = InboxBase & {
+  type: "feature_request"
+  featuramaProjectId: string
+  requestId: string
+  title: string
+  body: string | null
+  status: string | null
+  votes: number
+  approved: boolean
+  platform: string | null
+  appVersion: string | null
+  requestedAt: string | null
+  lastUserCommentAt: string | null
+  lastDeveloperCommentAt: string | null
+  commentCount: number
+  comments: FeatureRequestComment[]
+  url: string | null
+}
+
+export type InboxReview = InboxBase &
+  Omit<StoreReview, "id" | "projectId" | "needsReply"> & {
+    type: "review"
+  }
+
+export type InboxItem = InboxFeatureRequest | InboxReview
+
+/** GET /app/inbox */
+export type AppInbox = {
+  project: string | null
+  counts: {
+    featureRequests: { total: number; needsReply: number; pending: number }
+    reviews: {
+      total: number
+      needsReply: number
+      ratingsOnly: number
+      google_play?: { total: number; needsReply: number }
+      app_store?: { total: number; needsReply: number }
+    }
+  }
+  items: InboxItem[]
+}
+
+/** GET /strategies: stored strategy (kind strategy) or a format (kind format, category shortform). */
+export type StrategyAccount = {
+  id: string
+  name: string
+  status: string
+  source: "account" | "plan" | string
+  dates?: string[]
+}
+
+export type Strategy = {
+  kind: "strategy" | "format"
+  id: string
+  projectId: string | null
+  category: string
+  name: string
+  summary: string | null
+  guide?: string | null
+  status: string
+  skills: string[]
+  source?: string | null
+  actor?: string
+  version?: number
+  url?: string
+  accounts?: StrategyAccount[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** GET /knowledge: learning or decision with project and category. */
+export type KnowledgeItem = {
+  type: "learning" | "decision"
+  id: number
+  scopeType: string
+  scopeId: string | null
+  /** project of the scope, null for global/growth */
+  projectId: string | null
+  category: string
+  date: string
+  actor: string
+  source: string | null
+  createdAt?: string
+  updatedAt?: string
+  // learning
+  statement?: string
+  evidence?: string
+  evidencePostIds?: string[]
+  status?: string
+  // decision
+  kind?: string
+  title?: string
+  rationale?: string
+  supersedesId?: number | null
 }
 
 /** One run in GET /geo/summary (all checks of a date and engine). */

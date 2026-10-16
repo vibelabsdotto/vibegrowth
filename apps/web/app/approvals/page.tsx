@@ -1,5 +1,10 @@
 import { Inbox } from "lucide-react"
-import { ApprovalCard } from "@/components/growth/approval-card"
+import { inboxKey, replyType } from "@/components/growth/approval-app"
+import {
+  ApprovalCard,
+  type ApprovalContext,
+} from "@/components/growth/approval-card"
+import { CategoryTabs } from "@/components/growth/category"
 import { APPROVAL_KIND_LABEL } from "@/components/growth/format"
 import { load, projectScope } from "@/components/growth/server"
 import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
@@ -7,7 +12,14 @@ import { EmptyState, SectionError } from "@/components/growth/status"
 import { UrlFilter, UrlToggle } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import type { Approval } from "@/lib/growth-types"
+import { parseCategory } from "@/lib/categories"
+import type {
+  AppInbox,
+  Approval,
+  InboxItem,
+  ReplyPayload,
+  TaskPayload,
+} from "@/lib/growth-types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Wartet auf Max" }
@@ -18,7 +30,7 @@ const STATUS_QUERY: Record<string, string> = {
   all: "all",
 }
 
-type Search = { status?: string; kind?: string }
+type Search = { status?: string; kind?: string; category?: string }
 
 export default async function ApprovalsPage({
   searchParams,
@@ -27,6 +39,7 @@ export default async function ApprovalsPage({
 }) {
   const sp = await searchParams
   const status = sp.status && STATUS_QUERY[sp.status] ? sp.status : "pending"
+  const category = parseCategory(sp.category)
   const scope = await projectScope()
   const { project, projects } = scope
   const [res, pendingRes] = await Promise.all([
@@ -34,6 +47,7 @@ export default async function ApprovalsPage({
       status: STATUS_QUERY[status],
       project: project || undefined,
       kind: sp.kind,
+      category: category || undefined,
       limit: status === "pending" ? undefined : 200,
     }),
     // The sidebar badge counts every project; say what the project filter hides.
@@ -44,6 +58,7 @@ export default async function ApprovalsPage({
   ).length
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
   const rows = res.data ?? []
+  const contexts = await appContexts(rows, project)
   const groups = new Map<string, Approval[]>()
   for (const a of rows) {
     const g = groups.get(a.projectId) ?? []
@@ -53,7 +68,11 @@ export default async function ApprovalsPage({
   const ordered = [...groups.entries()].sort((a, b) =>
     name(a[0]).localeCompare(name(b[0]), "de")
   )
-  const params = { status: sp.status, kind: sp.kind }
+  const params = {
+    status: sp.status,
+    kind: sp.kind,
+    category: category || undefined,
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-6">
@@ -82,6 +101,7 @@ export default async function ApprovalsPage({
           </AlertDescription>
         </Alert>
       ) : null}
+      <CategoryTabs value={category} params={params} />
       <div className="flex flex-wrap items-center gap-2">
         <UrlToggle
           param="status"
@@ -130,7 +150,11 @@ export default async function ApprovalsPage({
       ) : project ? (
         <div className="flex flex-col gap-3">
           {rows.map((a) => (
-            <ApprovalCard key={a.id} approval={a} />
+            <ApprovalCard
+              key={a.id}
+              approval={a}
+              context={contexts.get(a.id)}
+            />
           ))}
         </div>
       ) : (
@@ -148,11 +172,49 @@ export default async function ApprovalsPage({
               <span className="font-normal tabular-nums">{items.length}</span>
             </h2>
             {items.map((a) => (
-              <ApprovalCard key={a.id} approval={a} />
+              <ApprovalCard
+                key={a.id}
+                approval={a}
+                context={contexts.get(a.id)}
+              />
             ))}
           </section>
         ))
       )}
     </div>
   )
+}
+
+/**
+ * Reply and task suggestions show the message they answer: one GET /app/inbox for the
+ * scope (all projects when none is chosen), matched by project, inbox type and item id.
+ */
+async function appContexts(rows: Approval[], project: string) {
+  const out = new Map<number, ApprovalContext>()
+  const app = rows.filter((a) => a.kind === "reply" || a.kind === "task")
+  if (!app.length) return out
+  const inbox = await load<AppInbox>("/app/inbox", {
+    project: project || undefined,
+    limit: 5000,
+  })
+  const items = new Map<string, InboxItem>()
+  for (const i of inbox.data?.items ?? [])
+    items.set(inboxKey(i.projectId, i.type, i.itemId), i)
+  for (const a of app) {
+    if (a.kind === "reply") {
+      const p = (a.payload ?? {}) as ReplyPayload
+      out.set(a.id, {
+        item: items.get(inboxKey(a.projectId, replyType(p.target), p.itemId)),
+      })
+    } else {
+      const p = (a.payload ?? {}) as TaskPayload
+      const sources: Record<string, InboxItem> = {}
+      for (const s of p.sources ?? []) {
+        const item = items.get(inboxKey(a.projectId, s.type, s.id))
+        if (item) sources[`${s.type}|${s.id}`] = item
+      }
+      out.set(a.id, { sources })
+    }
+  }
+  return out
 }

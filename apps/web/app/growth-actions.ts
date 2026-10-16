@@ -9,6 +9,7 @@ import type {
   ContentDetail,
   ContentItem,
   MentionTarget,
+  Strategy,
 } from "@/lib/growth-types"
 
 /** Same shape as app/actions.ts. Every call goes to apps/api with X-Actor: max. */
@@ -63,15 +64,22 @@ function compact(o: Values) {
 
 export type Decision = "approved" | "rejected" | "changes_requested"
 
+/** `text` only for kind reply with approved: replaces payload.text (original stays in history). */
 export async function decideApproval(
   id: number,
   decision: Decision,
-  note?: string
+  note?: string,
+  text?: string
 ) {
-  return call<Approval>(`/approvals/${id}/decide`, "POST", {
-    decision,
-    note: note?.trim() ? note.trim() : undefined,
-  })
+  return call<Approval & { effects?: unknown[] }>(
+    `/approvals/${id}/decide`,
+    "POST",
+    {
+      decision,
+      note: note?.trim() ? note.trim() : undefined,
+      text: text?.trim() ? text.trim() : undefined,
+    }
+  )
 }
 
 // ---------- collectors ----------
@@ -148,6 +156,8 @@ function backlogFields(v: Values) {
     effort: n(v.effort),
     source: s(v.source),
     doneRef: s(v.doneRef),
+    category: s(v.category) ?? undefined,
+    notionUrl: s(v.notionUrl),
   })
 }
 
@@ -181,6 +191,65 @@ export async function addChange(v: Values) {
 
 export async function updateExperimentStatus(id: number, status: string) {
   return call(`/experiments/${id}`, "PATCH", { status })
+}
+
+// ---------- strategies ----------
+
+/** Skills as a comma or line separated list. */
+const skillList = (v: unknown) =>
+  v === undefined
+    ? undefined
+    : String(v ?? "")
+        .split(/[,\n]/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+
+function strategyFields(v: Values) {
+  return compact({
+    name: s(v.name) ?? undefined,
+    category: s(v.category) ?? undefined,
+    status: s(v.status) ?? undefined,
+    summary: s(v.summary),
+    guide: s(v.guide),
+    source: s(v.source),
+    skills: skillList(v.skills),
+  })
+}
+
+/** projectId "" = für alle Projekte (null). */
+export async function createStrategy(v: Values) {
+  return call<Strategy>("/strategies", "POST", {
+    ...strategyFields(v),
+    projectId: s(v.project) ?? undefined,
+  })
+}
+
+export async function updateStrategy(id: string, v: Values) {
+  return call<Strategy>(
+    `/strategies/${encodeURIComponent(id)}`,
+    "PATCH",
+    compact({
+      ...strategyFields(v),
+      projectId: v.project === undefined ? undefined : s(v.project),
+    })
+  )
+}
+
+export async function setStrategyStatus(id: string, status: string) {
+  return call<Strategy>(`/strategies/${encodeURIComponent(id)}`, "PATCH", {
+    status,
+  })
+}
+
+// ---------- knowledge ----------
+
+/** category null = wieder ableiten. */
+export async function setKnowledgeCategory(
+  type: "learning" | "decision",
+  id: number,
+  category: string | null
+) {
+  return call(`/knowledge/${type}/${id}`, "PATCH", { category })
 }
 
 // ---------- geo ----------

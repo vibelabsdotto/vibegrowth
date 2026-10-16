@@ -39,9 +39,15 @@ async function navFetch<T>(path: string): Promise<T | null> {
 }
 
 async function navData() {
-  const [projects, pending] = await Promise.all([
+  const [projects, pending, inbox] = await Promise.all([
     navFetch<{ id: string; name: string; status?: string }[]>("/projects"),
     navFetch<unknown[]>("/approvals?status=pending"),
+    navFetch<{
+      counts?: {
+        featureRequests?: { needsReply?: number }
+        reviews?: { needsReply?: number }
+      }
+    }>("/app/inbox?limit=1"),
   ])
   const list: SidebarProject[] = Array.isArray(projects)
     ? projects
@@ -53,7 +59,12 @@ async function navData() {
     projects: list,
     // A deleted or archived project falls back to "alle".
     selected: list.some((p) => p.id === chosen) ? chosen : "",
-    pendingApprovals: Array.isArray(pending) ? pending.length : 0,
+    // Badges count every project, like the approvals badge always did.
+    counts: {
+      pendingApprovals: Array.isArray(pending) ? pending.length : 0,
+      featureRequestsOpen: inbox?.counts?.featureRequests?.needsReply ?? 0,
+      reviewsOpen: inbox?.counts?.reviews?.needsReply ?? 0,
+    },
     apiDown: projects === null,
   }
 }

@@ -24,6 +24,8 @@ export const APPROVAL_KIND_LABEL: Record<string, string> = {
   draft: "Entwurf",
   store_text: "Store-Text",
   strategy: "Strategie",
+  reply: "Antwort",
+  task: "Aufgabe",
   other: "Sonstiges",
 }
 
@@ -48,6 +50,9 @@ export const BACKLOG_KIND_LABEL: Record<string, string> = {
   content: "Content",
   store: "Store",
   growth: "Growth",
+  bug: "Fehler",
+  feature: "Funktion",
+  ux: "UX",
   other: "Sonstiges",
 }
 
@@ -71,6 +76,7 @@ export const CHANGE_KIND_LABEL: Record<string, string> = {
   store: "Store",
   config: "Konfiguration",
   shorts: "Shorts",
+  reply: "Antwort",
   other: "Sonstiges",
 }
 
@@ -119,12 +125,40 @@ export const COLLECTOR_LABEL: Record<string, string> = {
   app: "App-Analytics",
   play: "Google Play",
   asc: "App Store Connect",
+  reviews: "Store-Bewertungen",
+  featurama: "Featurama",
   "geo-chatgpt": "ChatGPT-Nennungen",
 }
 
 export const STORE_LABEL: Record<string, string> = {
   app_store: "App Store",
   google_play: "Google Play",
+}
+
+/** Where a reply goes (approval kind reply, inbox target). */
+export const REPLY_TARGET_LABEL: Record<string, string> = {
+  featurama: "Featurama",
+  google_play: "Google Play",
+  app_store: "App Store",
+}
+
+/** Highest reply length per target, counted like the API (String.length). */
+export const REPLY_MAX_LENGTH: Record<string, number> = {
+  google_play: 350,
+  app_store: 5970,
+  featurama: 10000,
+}
+
+export const STRATEGY_STATUS_LABEL: Record<string, string> = {
+  active: "aktiv",
+  paused: "pausiert",
+  retired: "beendet",
+}
+
+/** Source types of a task suggestion (payload.sources[].type). */
+export const SOURCE_TYPE_LABEL: Record<string, string> = {
+  feature_request: "Feature Request",
+  review: "Bewertung",
 }
 
 export const METRIC_LABEL: Record<string, string> = {

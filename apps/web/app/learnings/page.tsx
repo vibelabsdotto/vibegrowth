@@ -1,4 +1,5 @@
 import { Suspense } from "react"
+import { CategoryLabel, CategoryTabs } from "@/components/growth/category"
 import { LearningStatusButton, NewLearning } from "@/components/knowledge-forms"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -13,13 +14,10 @@ import { UrlSelect } from "@/components/url-select"
 import { actorLabel, fmtDate } from "@/lib/labels"
 import { ScopedDescription } from "@/components/scope-badge"
 import { apiFetch } from "@/lib/api"
-import {
-  isCrossProject,
-  knowledgeInScope,
-  projectScope,
-  scopeLabeler,
-} from "@/lib/server"
-import type { AccountRow, FormatRow, LearningRow } from "@/lib/types"
+import { parseCategory } from "@/lib/categories"
+import type { KnowledgeItem } from "@/lib/growth-types"
+import { isCrossProject, projectScope, scopeLabeler } from "@/lib/server"
+import type { AccountRow, FormatRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Learnings" }
@@ -27,9 +25,14 @@ export const metadata = { title: "Learnings" }
 export default async function LearningsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ account?: string; status?: string }>
+  searchParams: Promise<{
+    account?: string
+    status?: string
+    category?: string
+  }>
 }) {
   const sp = await searchParams
+  const category = parseCategory(sp.category)
   const [all, { projects: brands, project }, formats] = await Promise.all([
     apiFetch<AccountRow[]>("/accounts"),
     projectScope(),
@@ -40,21 +43,23 @@ export default async function LearningsPage({
   const scopeName = scopeLabeler(all, brands, formats, !project)
   const status =
     sp.status === "all"
-      ? undefined
+      ? "all"
       : sp.status === "outdated"
         ? "outdated"
         : "active"
-  // GET /learnings knows active or all; "outdated" is filtered here. The project from the
-  // switcher keeps its own scopes plus global and growth (see knowledgeInScope).
-  const items = knowledgeInScope(
-    (
-      await apiFetch<LearningRow[]>("/learnings", {
-        query: { account: account || undefined, all: status !== "active" },
-      })
-    ).filter((l) => !status || l.status === status),
-    project,
-    all,
-    formats
+  // GET /knowledge with the switcher's project returns its own rows (brand, accounts,
+  // formats) plus global and growth; the category filter runs in the API.
+  const items = (
+    await apiFetch<KnowledgeItem[]>("/knowledge", {
+      query: {
+        type: "learning",
+        project: project?.id,
+        category: category || undefined,
+        status,
+      },
+    })
+  ).filter(
+    (l) => !account || (l.scopeType === "account" && l.scopeId === account)
   )
   const accOpts = accounts.map((a) => ({ value: a.id, label: a.name }))
   const groups = project
@@ -119,10 +124,20 @@ export default async function LearningsPage({
           </>
         }
       />
+      <Suspense>
+        <CategoryTabs
+          value={category}
+          params={{ account: account || undefined, status: sp.status }}
+        />
+      </Suspense>
       {items.length === 0 ? (
         <Empty>
           <EmptyHeader>
-            <EmptyTitle>Keine Learnings</EmptyTitle>
+            <EmptyTitle>
+              {category
+                ? "Keine Learnings in diesem Bereich"
+                : "Keine Learnings"}
+            </EmptyTitle>
             <EmptyDescription>
               Agents tragen sie per „vibegrowth learning add“ mit Beleg ein.
             </EmptyDescription>
@@ -152,12 +167,18 @@ export default async function LearningsPage({
                       <p className="min-w-0 flex-1 font-medium">
                         {l.statement}
                       </p>
-                      <LearningStatusButton id={l.id} status={l.status} />
+                      <LearningStatusButton
+                        id={l.id}
+                        status={l.status ?? "active"}
+                      />
                     </div>
                     <p className="text-sm whitespace-pre-wrap text-muted-foreground">
                       {l.evidence}
                     </p>
                     <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      {!category ? (
+                        <CategoryLabel category={l.category} />
+                      ) : null}
                       <Badge variant="outline">
                         {scopeName(l.scopeType, l.scopeId)}
                       </Badge>

@@ -59,41 +59,6 @@ export function formatsInScope(
 
 type Scoped = { scopeType: string; scopeId: string | null }
 
-/**
- * Learnings and decisions for a project: its brand scope, its accounts, formats its accounts
- * run or that belong to it, plus global and growth (both apply to every project).
- */
-export function knowledgeInScope<T extends Scoped>(
-  items: T[],
-  project: ProjectRow | null,
-  accounts: AccountRow[],
-  formats: FormatRow[]
-) {
-  if (!project) return items
-  const own = accounts.filter((a) => a.brandId === project.id)
-  const accountIds = new Set(own.map((a) => a.id))
-  const formatIds = new Set(
-    formats
-      .filter(
-        (f) =>
-          f.brandId === project.id ||
-          own.some((a) => a.defaultFormatId === f.id)
-      )
-      .map((f) => f.id)
-  )
-  return items.filter((i) =>
-    isCrossProject(i)
-      ? true
-      : i.scopeType === "brand"
-        ? i.scopeId === project.id
-        : i.scopeType === "account"
-          ? accountIds.has(i.scopeId ?? "")
-          : i.scopeType === "format"
-            ? formatIds.has(i.scopeId ?? "")
-            : false
-  )
-}
-
 /** global and growth apply to all projects; everything else belongs to one. */
 export function isCrossProject(i: Scoped) {
   return i.scopeType === "global" || i.scopeType === "growth"

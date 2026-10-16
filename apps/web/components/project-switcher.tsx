@@ -1,6 +1,6 @@
 "use client"
 
-import { usePathname, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { useTransition } from "react"
 import { ChevronsUpDown, Layers3, TrendingUp } from "lucide-react"
 import { selectProject } from "@/app/scope-actions"
@@ -28,20 +28,17 @@ export function ProjectSwitcher({
   selected: string
 }) {
   const router = useRouter()
-  const pathname = usePathname()
   const { isMobile, state } = useSidebar()
   const [pending, start] = useTransition()
-  // On a cockpit page the URL names the project; show that one.
-  const cockpit = pathname.match(/^\/projects\/([^/]+)/)
-  const current = cockpit ? decodeURIComponent(cockpit[1]) : selected
+  const current = selected
   const name = projects.find((p) => p.id === current)?.name
 
   const choose = (value: string) => {
     const id = value === ALL ? "" : value
     start(async () => {
+      // The Übersicht (/) shows the cockpit for a chosen project, so a refresh is enough everywhere.
       await selectProject(id)
-      if (cockpit) router.push(id ? `/projects/${encodeURIComponent(id)}` : "/")
-      else router.refresh()
+      router.refresh()
     })
   }
 

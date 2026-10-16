@@ -1,3 +1,4 @@
+import { Cockpit } from "@/components/growth/cockpit"
 import { FunnelCompact } from "@/components/growth/funnel"
 import {
   fmtAgo,
@@ -6,6 +7,7 @@ import {
   LIGHT_LABEL,
   PROJECT_KIND_LABEL,
 } from "@/components/growth/format"
+import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
 import { load, projectScope, requestTime } from "@/components/growth/server"
 import {
   EmptyState,
@@ -15,14 +17,13 @@ import {
 } from "@/components/growth/status"
 import { UrlToggle } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
-import { Badge } from "@/components/ui/badge"
 import type { Light, OverviewRow } from "@/lib/growth-types"
 import { cn } from "@/lib/utils"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Übersicht" }
 
-// Links from here change the project scope (?project=, cockpit). Plain anchors on purpose:
+// Links from here change the project scope (?project=). Plain anchors on purpose:
 // a full load re-renders the sidebar switcher, a client-side <Link> would leave it stale.
 
 const ORDER: Record<string, number> = { red: 0, yellow: 1, green: 2 }
@@ -39,12 +40,11 @@ export default async function OverviewPage({
 }) {
   const sp = await searchParams
   const days = sp.days === "28" ? 28 : 7
-  // Always every project: this page is the cross-project view. The switcher's project is highlighted.
-  const [res, scope] = await Promise.all([
-    load<OverviewRow[]>("/overview", { days }),
-    projectScope(),
-  ])
-  const selected = scope.project
+  // One page, two views: with a project chosen in the switcher the cockpit, otherwise every project.
+  const scope = await projectScope()
+  if (scope.project)
+    return <Cockpit id={scope.project} days={days} daysParam={sp.days} />
+  const res = await load<OverviewRow[]>("/overview", { days })
   const rows = [...(res.data ?? [])].sort(
     (a, b) =>
       (ORDER[a.light] ?? 3) - (ORDER[b.light] ?? 3) ||
@@ -59,7 +59,12 @@ export default async function OverviewPage({
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
       <PageHeader
         title="Übersicht"
-        description={`Immer alle Projekte, letzte ${days} Tage gegen die ${days} Tage davor.`}
+        description={
+          <ScopeLabel project="" name="Alle Projekte">
+            Letzte {days} Tage gegen die {days} Tage davor. Ein Projekt öffnet
+            sein Cockpit.
+          </ScopeLabel>
+        }
         actions={
           <UrlToggle
             param="days"
@@ -102,26 +107,17 @@ export default async function OverviewPage({
             {rows.map((r) => (
               <li
                 key={r.project.id}
-                aria-current={r.project.id === selected ? "true" : undefined}
-                className={cn(
-                  "grid min-w-0 grid-cols-1 gap-3 p-4 first:rounded-t-xl last:rounded-b-xl lg:grid-cols-[13rem_minmax(0,1fr)_13rem] lg:gap-6",
-                  r.project.id === selected &&
-                    "bg-muted/50 shadow-[inset_3px_0_0_var(--foreground)]"
-                )}
+                className="grid min-w-0 grid-cols-1 gap-3 p-4 first:rounded-t-xl last:rounded-b-xl lg:grid-cols-[13rem_minmax(0,1fr)_13rem] lg:gap-6"
               >
                 <div className="flex min-w-0 flex-col gap-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <LightBadge light={r.light} />
-                    {r.project.id === selected ? (
-                      <Badge variant="secondary">Gewählt</Badge>
-                    ) : null}
-                  </span>
-                  <a
-                    href={`/projects/${encodeURIComponent(r.project.id)}`}
+                  <LightBadge light={r.light} />
+                  <ScopeLink
+                    path="/"
+                    project={r.project.id}
                     className="truncate font-medium underline-offset-4 hover:underline"
                   >
                     {r.project.name}
-                  </a>
+                  </ScopeLink>
                   <span className="truncate text-xs text-muted-foreground">
                     {label(PROJECT_KIND_LABEL, r.project.kind)}
                     {r.project.url

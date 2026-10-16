@@ -1,3 +1,4 @@
+import { CategoryLabel, CategoryTabs } from "@/components/growth/category"
 import { NewDecision } from "@/components/knowledge-forms"
 import { PageHeader } from "@/components/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -10,27 +11,39 @@ import {
 import { actorLabel, fmtDate } from "@/lib/labels"
 import { ScopedDescription } from "@/components/scope-badge"
 import { apiFetch } from "@/lib/api"
-import {
-  isCrossProject,
-  knowledgeInScope,
-  projectScope,
-  scopeLabeler,
-} from "@/lib/server"
-import type { AccountRow, DecisionRow, FormatRow } from "@/lib/types"
+import { parseCategory } from "@/lib/categories"
+import type { KnowledgeItem } from "@/lib/growth-types"
+import { isCrossProject, projectScope, scopeLabeler } from "@/lib/server"
+import type { AccountRow, FormatRow } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Entscheidungen" }
 
-export default async function DecisionsPage() {
-  const [all, { projects: brands, project }, formats, every] =
-    await Promise.all([
-      apiFetch<AccountRow[]>("/accounts"),
-      projectScope(),
-      apiFetch<FormatRow[]>("/formats"),
-      apiFetch<DecisionRow[]>("/decisions"),
-    ])
-  // Project from the switcher: its own scopes plus global and growth (see knowledgeInScope).
-  const items = knowledgeInScope(every, project, all, formats)
+export default async function DecisionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ category?: string }>
+}) {
+  const sp = await searchParams
+  const category = parseCategory(sp.category)
+  const [all, scope, formats] = await Promise.all([
+    apiFetch<AccountRow[]>("/accounts"),
+    projectScope(),
+    apiFetch<FormatRow[]>("/formats"),
+  ])
+  const { projects: brands, project } = scope
+  // GET /knowledge: the switcher's project (its brand, accounts, formats) plus global and growth.
+  const [items, every] = await Promise.all([
+    apiFetch<KnowledgeItem[]>("/knowledge", {
+      query: {
+        type: "decision",
+        project: project?.id,
+        category: category || undefined,
+      },
+    }),
+    // all decisions, to name the one a decision supersedes
+    apiFetch<KnowledgeItem[]>("/knowledge", { query: { type: "decision" } }),
+  ])
   const accounts = all.filter((a) => !project || a.brandId === project.id)
   const byId = new Map(every.map((d) => [d.id, d]))
   const scopeName = scopeLabeler(all, brands, formats, !project)
@@ -58,6 +71,7 @@ export default async function DecisionsPage() {
           />
         }
       />
+      <CategoryTabs value={category} />
       {items.length === 0 ? (
         <Empty>
           <EmptyHeader>
@@ -83,6 +97,7 @@ export default async function DecisionsPage() {
                 <Badge variant={isCrossProject(d) ? "outline" : "secondary"}>
                   {scopeName(d.scopeType, d.scopeId)}
                 </Badge>
+                {!category ? <CategoryLabel category={d.category} /> : null}
                 {actorLabel(d.actor)}
               </div>
               <h3 className="font-semibold">{d.title}</h3>

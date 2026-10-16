@@ -6,18 +6,21 @@ import {
   BookOpen,
   CalendarDays,
   Clapperboard,
+  Compass,
   FileText,
   FlaskConical,
-  FolderKanban,
+  Funnel,
   GitBranch,
   History,
   Inbox,
-  Layers,
   LayoutDashboard,
   Lightbulb,
   ListTodo,
+  MessageSquareText,
   Quote,
+  SearchCheck,
   Sparkles,
+  Star,
   Store,
   Users,
   type LucideIcon,
@@ -47,67 +50,94 @@ type NavItem = {
   label: string
   icon: LucideIcon
   badge?: number
+  /** Further path prefixes that belong to this item (e.g. format pages under Strategien). */
+  also?: string[]
 }
 
 export type SidebarProject = { id: string; name: string }
+
+export type SidebarCounts = {
+  pendingApprovals: number
+  featureRequestsOpen: number
+  reviewsOpen: number
+}
+
+const web: NavItem[] = [
+  { href: "/content", label: "Content", icon: FileText },
+  { href: "/search", label: "Suche & Audit", icon: SearchCheck },
+  { href: "/geo", label: "GEO", icon: Sparkles },
+]
 
 const shortform: NavItem[] = [
   { href: "/calendar", label: "Kalender", icon: CalendarDays },
   { href: "/posts", label: "Posts", icon: Clapperboard },
   { href: "/accounts", label: "Accounts", icon: Users },
-  { href: "/formats", label: "Formate", icon: Layers },
   { href: "/hooks", label: "Hooks", icon: Quote },
   { href: "/inspiration", label: "Inspiration", icon: Lightbulb },
-]
-
-const knowledge: NavItem[] = [
-  { href: "/learnings", label: "Learnings", icon: BookOpen },
-  { href: "/decisions", label: "Entscheidungen", icon: GitBranch },
-  { href: "/history", label: "Verlauf", icon: History },
 ]
 
 export function AppSidebar({
   projects = [],
   selected = "",
-  pendingApprovals = 0,
+  counts = { pendingApprovals: 0, featureRequestsOpen: 0, reviewsOpen: 0 },
   apiDown = false,
 }: {
   projects?: SidebarProject[]
   /** Project from the switcher, "" = alle */
   selected?: string
-  pendingApprovals?: number
+  counts?: SidebarCounts
   apiDown?: boolean
 }) {
   const pathname = usePathname()
   const { state, isMobile, setOpenMobile } = useSidebar()
   const collapsed = !isMobile && state === "collapsed"
-  const active = (href: string) =>
-    href === "/"
+  const under = (href: string) =>
+    pathname === href || pathname.startsWith(`${href}/`)
+  const active = (item: NavItem) =>
+    item.href === "/"
       ? pathname === "/"
-      : pathname === href || pathname.startsWith(`${href}/`)
+      : under(item.href) || (item.also ?? []).some(under)
 
-  const growth: NavItem[] = [
+  const general: NavItem[] = [
     { href: "/", label: "Übersicht", icon: LayoutDashboard },
-    ...(selected
-      ? [
-          {
-            href: `/projects/${encodeURIComponent(selected)}`,
-            label: "Cockpit",
-            icon: FolderKanban,
-          },
-        ]
-      : []),
     {
       href: "/approvals",
       label: "Wartet auf Max",
       icon: Inbox,
-      badge: pendingApprovals,
+      badge: counts.pendingApprovals,
     },
-    { href: "/content", label: "Content", icon: FileText },
-    { href: "/experiments", label: "Experimente & Log", icon: FlaskConical },
-    { href: "/backlog", label: "Backlog", icon: ListTodo },
-    { href: "/geo", label: "GEO", icon: Sparkles },
+    { href: "/tasks", label: "Aufgaben", icon: ListTodo, also: ["/backlog"] },
+    {
+      href: "/experiments",
+      label: "Experimente & Log",
+      icon: FlaskConical,
+    },
+    {
+      href: "/strategies",
+      label: "Strategien",
+      icon: Compass,
+      also: ["/formats"],
+    },
+    { href: "/learnings", label: "Learnings", icon: BookOpen },
+    { href: "/decisions", label: "Entscheidungen", icon: GitBranch },
+    { href: "/history", label: "Verlauf", icon: History },
+  ]
+
+  const app: NavItem[] = [
+    {
+      href: "/feature-requests",
+      label: "Feature Requests",
+      icon: MessageSquareText,
+      badge: counts.featureRequestsOpen,
+    },
+    {
+      href: "/reviews",
+      label: "Bewertungen",
+      icon: Star,
+      badge: counts.reviewsOpen,
+    },
     { href: "/store", label: "Store", icon: Store },
+    { href: "/funnel", label: "Funnel", icon: Funnel },
   ]
 
   const group = (label: string, items: NavItem[], empty?: string) => (
@@ -118,7 +148,7 @@ export function AppSidebar({
           {items.map((item) => (
             <SidebarMenuItem key={item.href}>
               <SidebarMenuButton
-                isActive={active(item.href)}
+                isActive={active(item)}
                 tooltip={
                   item.badge ? `${item.label} (${item.badge})` : item.label
                 }
@@ -126,7 +156,7 @@ export function AppSidebar({
                   <Link
                     href={item.href}
                     prefetch={false}
-                    aria-current={active(item.href) ? "page" : undefined}
+                    aria-current={active(item) ? "page" : undefined}
                     onNavigate={() => setOpenMobile(false)}
                   />
                 }
@@ -174,9 +204,10 @@ export function AppSidebar({
       </SidebarHeader>
       <SidebarContent>
         <nav aria-label="Hauptnavigation">
-          {group("Growth", growth)}
+          {group("Allgemein", general)}
+          {group("Web", web)}
+          {group("App", app)}
           {group("Shortform", shortform)}
-          {group("Wissen", knowledge)}
         </nav>
       </SidebarContent>
       <SidebarFooter>

@@ -1,7 +1,7 @@
 import Link from "next/link"
-import { notFound } from "next/navigation"
 import { ExternalLink } from "lucide-react"
 import { Level } from "@/components/growth/backlog-board"
+import { CategoryLabel } from "@/components/growth/category"
 import { CollectorPanel } from "@/components/growth/collector-panel"
 import {
   actorLabel,
@@ -17,6 +17,7 @@ import {
   PROJECT_KIND_LABEL,
 } from "@/components/growth/format"
 import { FunnelStrip } from "@/components/growth/funnel"
+import { ScopeLink } from "@/components/growth/scope"
 import { list, load, requestTime } from "@/components/growth/server"
 import { Delta, SectionError, VerdictToken } from "@/components/growth/status"
 import { UrlToggle } from "@/components/growth/url-filter"
@@ -30,58 +31,35 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { categoryLabel } from "@/lib/categories"
 import type {
   AccountLite,
+  AppInbox,
   Approval,
   BacklogItem,
   Channel,
   CollectorState,
   Experiment,
   Funnel,
+  KnowledgeItem,
   ProjectDetail,
+  Strategy,
 } from "@/lib/growth-types"
 
-export const dynamic = "force-dynamic"
-
-type Learning = {
-  id: number
-  scopeType: string
-  scopeId: string | null
-  statement: string
-  date: string
-  actor: string
-}
-type Decision = {
-  id: number
-  kind: string
-  title: string
-  rationale: string
-  date: string
-  actor: string
-  scopeType: string
-  scopeId: string | null
-}
-
-export async function generateMetadata({
-  params,
+/**
+ * Übersicht with a project chosen in the switcher (formerly /projects/<id>): funnel, open
+ * approvals, experiments, tasks, strategies, app inbox, knowledge, data sources, channels.
+ */
+export async function Cockpit({
+  id,
+  days,
+  daysParam,
 }: {
-  params: Promise<{ id: string }>
+  id: string
+  days: 7 | 28
+  /** raw ?days= for the period toggle */
+  daysParam?: string
 }) {
-  const { id } = await params
-  const res = await load<ProjectDetail>(`/projects/${encodeURIComponent(id)}`)
-  return { title: res.data?.name ?? id }
-}
-
-export default async function ProjectPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>
-  searchParams: Promise<{ days?: string }>
-}) {
-  const { id } = await params
-  const sp = await searchParams
-  const days = sp.days === "28" ? 28 : 7
   const pid = encodeURIComponent(id)
   const [
     projectRes,
@@ -90,8 +68,9 @@ export default async function ProjectPage({
     approvalsRes,
     experimentsRes,
     backlogRes,
-    learningsRes,
-    decisionsRes,
+    knowledgeRes,
+    strategiesRes,
+    inboxRes,
   ] = await Promise.all([
     load<ProjectDetail>(`/projects/${pid}`),
     load<Funnel>("/funnel", { project: id, days }),
@@ -99,11 +78,11 @@ export default async function ProjectPage({
     load<Approval[]>("/approvals", { project: id, status: "pending" }),
     load<Experiment[]>("/experiments", { project: id }),
     load<BacklogItem[]>("/backlog", { project: id, status: "open,doing" }),
-    load<Learning[]>("/learnings"),
-    load<Decision[]>("/decisions"),
+    load<KnowledgeItem[]>("/knowledge", { project: id }),
+    load<Strategy[]>("/strategies", { project: id, status: "active" }),
+    load<AppInbox>("/app/inbox", { project: id, limit: 1 }),
   ])
   if (projectRes.error !== null) {
-    if (/NOT_FOUND/.test(projectRes.error)) notFound()
     return (
       <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
         <SectionError title="Projekt nicht geladen" error={projectRes.error} />
@@ -113,12 +92,16 @@ export default async function ProjectPage({
   const p = projectRes.data
   const now = requestTime()
   const accounts = list<AccountLite>(p.accounts)
-  const accountIds = new Set(accounts.map((a) => a.id))
-  const inScope = (s: { scopeType: string; scopeId: string | null }) =>
-    (s.scopeType === "brand" && s.scopeId === p.id) ||
-    (s.scopeType === "account" && !!s.scopeId && accountIds.has(s.scopeId))
-  const learnings = list<Learning>(learningsRes.data).filter(inScope)
-  const decisions = list<Decision>(decisionsRes.data).filter(inScope)
+  // Own knowledge only (brand, accounts, formats); global and growth live on their pages.
+  const knowledge = list<KnowledgeItem>(knowledgeRes.data).filter(
+    (k) => k.projectId === p.id
+  )
+  const learnings = knowledge.filter(
+    (k) => k.type === "learning" && k.status !== "outdated"
+  )
+  const decisions = knowledge.filter((k) => k.type === "decision")
+  const strategies = list<Strategy>(strategiesRes.data)
+  const inbox = inboxRes.data?.counts
   const channels = list<Channel>(p.channels)
   const experiments = experimentsRes.data ?? []
   const running = experiments.filter((e) => e.status === "running")
@@ -140,7 +123,7 @@ export default async function ProjectPage({
         title={p.name}
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span>{label(PROJECT_KIND_LABEL, p.kind)}</span>
+            <span>Übersicht · {label(PROJECT_KIND_LABEL, p.kind)}</span>
             {p.status !== "active" ? (
               <Badge variant="outline">
                 {p.status === "paused" ? "pausiert" : "archiviert"}
@@ -157,13 +140,20 @@ export default async function ProjectPage({
                 <ExternalLink aria-hidden="true" className="size-3" />
               </a>
             ) : null}
+            <ScopeLink
+              path="/"
+              project=""
+              className="underline underline-offset-4"
+            >
+              Alle Projekte
+            </ScopeLink>
           </span>
         }
         actions={
           <UrlToggle
             param="days"
             value={String(days)}
-            params={{ days: sp.days }}
+            params={{ days: daysParam }}
             label="Zeitraum"
             options={[
               { value: "7", label: "7 Tage" },
@@ -236,6 +226,7 @@ export default async function ProjectPage({
                         {label(APPROVAL_KIND_LABEL, a.kind)}
                       </Badge>
                       <span className="min-w-0 truncate">{a.title}</span>
+                      <CategoryLabel category={a.category} />
                       <span className="ml-auto shrink-0 text-xs text-muted-foreground">
                         {fmtDateTime(a.createdAt)}
                       </span>
@@ -308,13 +299,13 @@ export default async function ProjectPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>Backlog</CardTitle>
+              <CardTitle>Aufgaben</CardTitle>
               <CardDescription>
                 In Arbeit und offen, höchster Impact zuerst
               </CardDescription>
               <CardAction>
                 <Link
-                  href="/backlog"
+                  href="/tasks"
                   prefetch={false}
                   className="text-sm underline underline-offset-4"
                 >
@@ -326,7 +317,9 @@ export default async function ProjectPage({
               {backlogRes.error !== null ? (
                 <SectionError error={backlogRes.error} />
               ) : backlog.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Backlog leer.</p>
+                <p className="text-sm text-muted-foreground">
+                  Keine offenen Aufgaben.
+                </p>
               ) : (
                 <ul className="flex flex-col divide-y">
                   {backlog.map((b) => (
@@ -342,6 +335,7 @@ export default async function ProjectPage({
                       ) : null}
                       <span className="flex items-center gap-3 text-xs">
                         <span className="text-muted-foreground">
+                          {categoryLabel(b.category)} ·{" "}
                           {label(BACKLOG_KIND_LABEL, b.kind)}
                         </span>
                         <Level name="Impact" value={b.impact} />
@@ -358,8 +352,17 @@ export default async function ProjectPage({
             <CardHeader>
               <CardTitle>Learnings und Entscheidungen</CardTitle>
               <CardDescription>
-                Projekt und seine Shorts-Accounts
+                Projekt, seine Accounts und Formate
               </CardDescription>
+              <CardAction>
+                <Link
+                  href="/learnings"
+                  prefetch={false}
+                  className="text-sm underline underline-offset-4"
+                >
+                  Alle
+                </Link>
+              </CardAction>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               {learnings.length + decisions.length === 0 ? (
@@ -373,7 +376,8 @@ export default async function ProjectPage({
                     <li key={`l${l.id}`} className="flex flex-col">
                       <span>{l.statement}</span>
                       <span className="text-xs text-muted-foreground">
-                        Learning · {fmtDate(l.date)} · {actorLabel(l.actor)}
+                        Learning · {categoryLabel(l.category)} ·{" "}
+                        {fmtDate(l.date)} · {actorLabel(l.actor)}
                         {l.scopeType === "account" ? ` · @${l.scopeId}` : ""}
                       </span>
                     </li>
@@ -390,7 +394,8 @@ export default async function ProjectPage({
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {d.kind === "pivot" ? "Pivot" : "Entscheidung"} ·{" "}
-                        {fmtDate(d.date)} · {actorLabel(d.actor)}
+                        {categoryLabel(d.category)} · {fmtDate(d.date)} ·{" "}
+                        {actorLabel(d.actor)}
                       </span>
                     </li>
                   ))}
@@ -401,6 +406,118 @@ export default async function ProjectPage({
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
+          {inbox && inbox.featureRequests.total + inbox.reviews.total > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>App-Inbox</CardTitle>
+                <CardDescription>
+                  Feature Requests und Bewertungen mit Antwortstatus
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-sm">
+                  <dt>
+                    <Link
+                      href="/feature-requests"
+                      prefetch={false}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      Feature Requests
+                    </Link>
+                  </dt>
+                  <dd className="text-right tabular-nums">
+                    {inbox.featureRequests.needsReply ? (
+                      <span className="font-medium text-(--status-warn)">
+                        {inbox.featureRequests.needsReply} brauchen Antwort
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {inbox.featureRequests.total} gesamt
+                      </span>
+                    )}
+                  </dd>
+                  <dt>
+                    <Link
+                      href="/reviews"
+                      prefetch={false}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      Bewertungen
+                    </Link>
+                  </dt>
+                  <dd className="text-right tabular-nums">
+                    {inbox.reviews.needsReply ? (
+                      <span className="font-medium text-(--status-warn)">
+                        {inbox.reviews.needsReply} brauchen Antwort
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {inbox.reviews.total} mit Text
+                      </span>
+                    )}
+                  </dd>
+                </dl>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Strategien</CardTitle>
+              <CardDescription>
+                {strategies.length
+                  ? `${strategies.length} aktiv`
+                  : "Keine aktiven Strategien"}
+              </CardDescription>
+              <CardAction>
+                <Link
+                  href="/strategies"
+                  prefetch={false}
+                  className="text-sm underline underline-offset-4"
+                >
+                  Alle
+                </Link>
+              </CardAction>
+            </CardHeader>
+            {strategiesRes.error !== null ? (
+              <CardContent>
+                <SectionError error={strategiesRes.error} />
+              </CardContent>
+            ) : strategies.length ? (
+              <CardContent>
+                <ul className="flex flex-col gap-2 text-sm">
+                  {strategies.slice(0, 8).map((s) => (
+                    <li
+                      key={`${s.kind}-${s.id}`}
+                      className="flex min-w-0 items-center gap-2"
+                    >
+                      <Link
+                        href={
+                          s.kind === "format"
+                            ? `/formats/${encodeURIComponent(s.id)}`
+                            : `/strategies/${encodeURIComponent(s.id)}`
+                        }
+                        prefetch={false}
+                        className="min-w-0 truncate underline-offset-4 hover:underline"
+                      >
+                        {s.name}
+                      </Link>
+                      {!s.projectId ? (
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          alle Projekte
+                        </span>
+                      ) : null}
+                      <CategoryLabel
+                        category={s.category}
+                        className="ml-auto font-normal text-muted-foreground"
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            ) : null}
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Datenquellen</CardTitle>

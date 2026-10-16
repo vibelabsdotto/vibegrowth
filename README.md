@@ -17,7 +17,7 @@ A Next.js web app on `127.0.0.1` shows everything. A CLI with `--json` on every 
 - **Waiting for Max.** Agents file proposals (blog topic, draft, store text, strategy, hook, format) as approvals. Only the actor `max` can approve, reject or ask for changes. Approving a content idea moves it to `approved`; approving a plan entry locks it.
 - **Content pipeline.** Blog posts, landing pages and store texts from idea to live, with search and visit numbers since the live date.
 - **Experiments and change log.** Every deploy, content, SEO or store change goes into the log. An experiment compares a baseline window with the window after the change and gets a verdict (`win`, `loss`, `neutral`, `inconclusive`).
-- **Backlog.** Growth tasks with impact and effort.
+- **Aufgaben (backlog).** Growth tasks with impact, effort and area (Web, Shortform, App, Allgemein).
 - **GEO.** Questions per project are asked in ChatGPT through an automation Chrome. VibeGrowth records whether the product is named, at which position, whether it is cited, and which competitors and sources appear.
 - **Mention targets.** Domains that AI answers cite (comparisons, guides, forums, press), with an outreach status.
 - **Store.** Installs, ratings, campaigns and reviews from Google Play and the App Store.

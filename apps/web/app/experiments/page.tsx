@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { AddChange } from "@/components/growth/add-change"
+import { CategoryLabel, CategoryTabs } from "@/components/growth/category"
 import { ChangeLegend, MarkedLineChart } from "@/components/growth/charts"
 import {
   addDays,
@@ -38,12 +39,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { parseCategory } from "@/lib/categories"
 import type { Change, Experiment, KpiRow } from "@/lib/growth-types"
 
 export const dynamic = "force-dynamic"
 export const metadata = { title: "Experimente & Log" }
 
-type Search = { range?: string }
+type Search = { range?: string; category?: string }
 
 const RANGES: Record<string, number> = { "28": 28, "90": 90, "180": 180 }
 
@@ -56,6 +58,7 @@ export default async function ExperimentsPage({
   const scope = await projectScope()
   const { project, projects } = scope
   const range = RANGES[sp.range ?? ""] ? sp.range! : "90"
+  const category = parseCategory(sp.category)
   // Up to today, so a change logged today shows in the log and as a marker (today's numbers are still empty).
   const to = localToday()
   const from = addDays(to, -(RANGES[range] - 1))
@@ -63,8 +66,16 @@ export default async function ExperimentsPage({
   // The traffic chart needs one project, so it only shows with a project chosen in the switcher.
   const chartProject = project
   const [expRes, changesRes, clicksRes, sessionsRes] = await Promise.all([
-    load<Experiment[]>("/experiments", { project: project || undefined }),
-    load<Change[]>("/changes", { project: project || undefined, from, to }),
+    load<Experiment[]>("/experiments", {
+      project: project || undefined,
+      category: category || undefined,
+    }),
+    load<Change[]>("/changes", {
+      project: project || undefined,
+      category: category || undefined,
+      from,
+      to,
+    }),
     chartProject
       ? load<KpiRow[]>("/kpi", {
           project: chartProject,
@@ -110,7 +121,7 @@ export default async function ExperimentsPage({
     .filter((c) => c.projectId === chartProject)
     .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
   const experiments = expRes.data ?? []
-  const params = { range: sp.range }
+  const params = { range: sp.range, category: category || undefined }
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
@@ -131,6 +142,8 @@ export default async function ExperimentsPage({
           />
         }
       />
+
+      <CategoryTabs value={category} params={{ range: sp.range }} />
 
       <section aria-labelledby="exp-title" className="flex flex-col gap-3">
         <h2 id="exp-title" className="text-base font-semibold">
@@ -171,11 +184,16 @@ export default async function ExperimentsPage({
                       >
                         {e.title}
                       </Link>
-                      {e.target ? (
-                        <span className="block truncate font-mono text-xs text-muted-foreground">
-                          {e.target}
-                        </span>
-                      ) : null}
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        {!category ? (
+                          <CategoryLabel category={e.category} />
+                        ) : null}
+                        {e.target ? (
+                          <span className="truncate font-mono text-xs text-muted-foreground">
+                            {e.target}
+                          </span>
+                        ) : null}
+                      </span>
                     </TableCell>
                     {!project ? (
                       <TableCell className="text-muted-foreground">
@@ -324,9 +342,14 @@ export default async function ExperimentsPage({
                         </TableCell>
                       ) : null}
                       <TableCell>
-                        <Badge variant="outline">
-                          {label(CHANGE_KIND_LABEL, c.kind)}
-                        </Badge>
+                        <span className="flex items-center gap-1.5">
+                          <Badge variant="outline">
+                            {label(CHANGE_KIND_LABEL, c.kind)}
+                          </Badge>
+                          {!category ? (
+                            <CategoryLabel category={c.category} />
+                          ) : null}
+                        </span>
                       </TableCell>
                       <TableCell className="max-w-[28rem] whitespace-normal">
                         {c.summary}

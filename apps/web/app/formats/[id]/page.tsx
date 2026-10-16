@@ -42,6 +42,13 @@ export default async function FormatPage({
 
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6">
+      <Link
+        href="/strategies?category=shortform"
+        prefetch={false}
+        className="w-fit text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        Alle Shortform-Strategien
+      </Link>
       <PageHeader
         title={f.name}
         description={

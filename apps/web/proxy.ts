@@ -19,7 +19,8 @@ const COOKIE_OPTS = {
  * project filters. Two ways set it besides the switcher:
  * - `?project=<id>` on any page link (`all` or empty = alle Projekte): stored, then redirected
  *   to the same URL without the parameter, so links and agents can deep-link into a project.
- * - opening a cockpit `/projects/<id>` selects that project.
+ * - `/projects/<id>` (old cockpit URL) selects that project and redirects to the Übersicht,
+ *   which shows the cockpit whenever a project is chosen.
  */
 export function proxy(req: NextRequest) {
   const host = req.headers.get("host") ?? ""
@@ -38,16 +39,25 @@ export function proxy(req: NextRequest) {
     return res
   }
 
+  // The cockpit is the Übersicht with a project chosen: /projects/<id> selects it and opens /.
   const cockpit = pathname.match(/^\/projects\/([^/]+)/)
   if (cockpit) {
     const id = decodeURIComponent(cockpit[1])
-    if (req.cookies.get(PROJECT_COOKIE)?.value !== id) {
-      // Also on the request, so this render already sees the new scope.
-      req.cookies.set(PROJECT_COOKIE, id)
-      const res = NextResponse.next({ request: { headers: req.headers } })
-      res.cookies.set(PROJECT_COOKIE, id, COOKIE_OPTS)
-      return res
+    const url = req.nextUrl.clone()
+    url.pathname = "/"
+    const res = NextResponse.redirect(url)
+    res.cookies.set(PROJECT_COOKIE, id, COOKIE_OPTS)
+    return res
+  }
+  // Renamed pages: Backlog is now Aufgaben, the format list lives under Strategien (Shortform).
+  if (pathname === "/backlog" || pathname === "/formats") {
+    const url = req.nextUrl.clone()
+    if (pathname === "/backlog") url.pathname = "/tasks"
+    else {
+      url.pathname = "/strategies"
+      url.searchParams.set("category", "shortform")
     }
+    return NextResponse.redirect(url)
   }
   return NextResponse.next()
 }

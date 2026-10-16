@@ -7,7 +7,9 @@ import { FormDrawer, type FieldSpec } from "@/components/form-drawer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { BacklogItem } from "@/lib/growth-types"
+import { CATEGORIES, CATEGORY_LABEL } from "@/lib/categories"
 import { cn } from "@/lib/utils"
+import { CategoryLabel } from "./category"
 import { actorLabel, BACKLOG_KIND_LABEL, label } from "./format"
 import { GroupedList, type GroupDef } from "./grouped-list"
 
@@ -52,6 +54,12 @@ const fields: FieldSpec[] = [
       label: l,
     })),
   },
+  {
+    name: "category",
+    label: "Bereich",
+    type: "select",
+    options: CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
+  },
   { name: "impact", label: "Impact", type: "select", options: levelOptions },
   { name: "effort", label: "Aufwand", type: "select", options: levelOptions },
   { name: "detail", label: "Details", type: "textarea", rows: 5 },
@@ -60,6 +68,12 @@ const fields: FieldSpec[] = [
     name: "doneRef",
     label: "Erledigt durch",
     placeholder: "Commit, PR oder Change-ID",
+  },
+  {
+    name: "notionUrl",
+    label: "Notion-Ticket",
+    type: "url",
+    placeholder: "https://www.notion.so/…",
   },
 ]
 
@@ -94,10 +108,13 @@ export function BacklogBoard({
   items,
   projects,
   project,
+  category = "",
 }: {
   items: BacklogItem[]
   projects: { id: string; name: string }[]
   project: string
+  /** Bereich from the page filter, preset for new tasks ("" = alle). */
+  category?: string
 }) {
   const [openId, setOpenId] = React.useState<number | null>(null)
   const [snapshot, setSnapshot] = React.useState<BacklogItem | null>(null)
@@ -111,7 +128,7 @@ export function BacklogBoard({
       <GroupedList
         groups={BACKLOG_GROUPS}
         items={sorted}
-        noun={{ one: "Eintrag", many: "Einträge" }}
+        noun={{ one: "Aufgabe", many: "Aufgaben" }}
         title={(b) => b.title}
         searchText={(b) =>
           [b.title, b.detail, b.source].filter(Boolean).join(" ")
@@ -122,6 +139,7 @@ export function BacklogBoard({
             {!project ? (
               <Badge variant="outline">{name(b.projectId)}</Badge>
             ) : null}
+            {!category ? <CategoryLabel category={b.category} /> : null}
             <span>{label(BACKLOG_KIND_LABEL, b.kind)}</span>
             <Level name="Impact" value={b.impact} />
             <Level name="Aufwand" value={b.effort} />
@@ -135,7 +153,7 @@ export function BacklogBoard({
         }}
         toolbar={
           <FormDrawer
-            title="Neuer Backlog-Eintrag"
+            title="Neue Aufgabe"
             fields={[
               {
                 name: "project",
@@ -145,23 +163,27 @@ export function BacklogBoard({
                 options: projects.map((p) => ({ value: p.id, label: p.name })),
               },
               ...fields.filter(
-                (f) => f.name !== "status" && f.name !== "doneRef"
+                (f) =>
+                  f.name !== "status" &&
+                  f.name !== "doneRef" &&
+                  f.name !== "notionUrl"
               ),
             ]}
             initial={{
               project: project || projects[0]?.id || "",
-              kind: "seo",
+              category: category || "web",
+              kind: category === "app" ? "feature" : "seo",
               impact: "2",
               effort: "2",
               source: "max",
             }}
             submitLabel="Anlegen"
-            successMessage="Backlog-Eintrag angelegt"
+            successMessage="Aufgabe angelegt"
             action={createBacklog}
             trigger={(show) => (
               <Button type="button" className="sm:ml-auto" onClick={show}>
                 <Plus data-icon="inline-start" aria-hidden="true" />
-                Neuer Eintrag
+                Neue Aufgabe
               </Button>
             )}
           />
@@ -184,14 +206,20 @@ export function BacklogBoard({
             title: current.title,
             status: current.status,
             kind: current.kind,
+            category: current.category ?? "web",
             impact: String(current.impact),
             effort: String(current.effort),
             detail: current.detail ?? "",
             source: current.source ?? "",
             doneRef: current.doneRef ?? "",
+            notionUrl: current.notionUrl ?? "",
           }}
-          successMessage="Backlog-Eintrag gespeichert"
-          action={(v) => updateBacklog(current.id, v)}
+          successMessage="Aufgabe gespeichert"
+          action={(v) => {
+            // Send the Bereich only when changed, so a derived one stays derived.
+            const { category: c, ...rest } = v
+            return updateBacklog(current.id, c === current.category ? rest : v)
+          }}
         />
       ) : null}
     </>

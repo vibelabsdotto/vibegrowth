@@ -73,9 +73,9 @@ export default async function ExperimentPage({
         title={e.title}
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {/* Plain anchor: the cockpit switches the project scope, the sidebar must re-render. */}
+            {/* Plain anchor: opening the project's Übersicht switches the scope, the sidebar must re-render. */}
             <a
-              href={`/projects/${encodeURIComponent(e.projectId)}`}
+              href={`/?project=${encodeURIComponent(e.projectId)}`}
               className="underline underline-offset-4"
             >
               {projectName}
