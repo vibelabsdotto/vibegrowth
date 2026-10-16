@@ -10,6 +10,8 @@ import {
 } from "@nestjs/common"
 import { Actor } from "../../common/actor.decorator"
 import { VGError } from "../../core/util"
+import { AppInboxService } from "./app-inbox.service"
+import { AppPublishService } from "./app-publish.service"
 import { ApprovalsService } from "./approvals.service"
 import { BacklogService } from "./backlog.service"
 import { ChangesService } from "./changes.service"
@@ -27,15 +29,21 @@ import {
   ExperimentPatchDto,
   GeoChecksDto,
   GeoQuestionCreateDto,
+  AppPublishDto,
   GeoQuestionPatchDto,
+  KnowledgePatchDto,
   MentionPatchDto,
+  StrategyCreateDto,
+  StrategyPatchDto,
 } from "./dto"
 import { ExperimentsService } from "./experiments.service"
 import { GeoService } from "./geo.service"
+import { KnowledgeService } from "./knowledge.service"
 import { OverviewService } from "./overview.service"
 import { ProjectContextService } from "./project-context.service"
 import { boolParam, idParam, intParam } from "./shared"
 import { StoreService } from "./store.service"
+import { StrategiesService } from "./strategies.service"
 
 @Controller("approvals")
 export class ApprovalsController {
@@ -47,7 +55,8 @@ export class ApprovalsController {
     @Query("status") status?: string,
     @Query("kind") kind?: string,
     @Query("account") account?: string,
-    @Query("limit") limit?: string
+    @Query("limit") limit?: string,
+    @Query("category") category?: string
   ) {
     return this.approvals.list({
       project,
@@ -55,6 +64,7 @@ export class ApprovalsController {
       kind,
       account,
       limit: intParam(limit, "limit"),
+      category,
     })
   }
 
@@ -93,9 +103,10 @@ export class ContentController {
   list(
     @Query("project") project?: string,
     @Query("status") status?: string,
-    @Query("kind") kind?: string
+    @Query("kind") kind?: string,
+    @Query("category") category?: string
   ) {
-    return this.content.list({ project, status, kind })
+    return this.content.list({ project, status, kind, category })
   }
 
   @Get(":id")
@@ -126,9 +137,10 @@ export class BacklogController {
   list(
     @Query("project") project?: string,
     @Query("status") status?: string,
-    @Query("kind") kind?: string
+    @Query("kind") kind?: string,
+    @Query("category") category?: string
   ) {
-    return this.backlog.list({ project, status, kind })
+    return this.backlog.list({ project, status, kind, category })
   }
 
   @Get(":id")
@@ -156,8 +168,12 @@ export class ExperimentsController {
   constructor(private readonly experiments: ExperimentsService) {}
 
   @Get()
-  list(@Query("project") project?: string, @Query("status") status?: string) {
-    return this.experiments.list({ project, status })
+  list(
+    @Query("project") project?: string,
+    @Query("status") status?: string,
+    @Query("category") category?: string
+  ) {
+    return this.experiments.list({ project, status, category })
   }
 
   @Post("evaluate")
@@ -197,9 +213,11 @@ export class ChangesController {
     @Query("to") to?: string,
     @Query("kind") kind?: string,
     @Query("experiment") experiment?: string,
-    @Query("limit") limit?: string
+    @Query("limit") limit?: string,
+    @Query("category") category?: string
   ) {
     return this.changes.list({
+      category,
       project,
       from,
       to,
@@ -314,7 +332,8 @@ export class StoreController {
     @Query("project") project?: string,
     @Query("store") store?: string,
     @Query("rating") rating?: string,
-    @Query("limit") limit?: string
+    @Query("limit") limit?: string,
+    @Query("needsReply") needsReply?: string
   ) {
     if (!project) throw new VGError("INVALID", "project fehlt")
     return this.store.reviews({
@@ -322,7 +341,107 @@ export class StoreController {
       store,
       rating: intParam(rating, "rating"),
       limit: intParam(limit, "limit", 50),
+      needsReply:
+        needsReply === undefined || needsReply === ""
+          ? undefined
+          : boolParam(needsReply),
     })
+  }
+}
+
+@Controller("strategies")
+export class StrategiesController {
+  constructor(private readonly strategies: StrategiesService) {}
+
+  @Get()
+  list(
+    @Query("project") project?: string,
+    @Query("category") category?: string,
+    @Query("status") status?: string
+  ) {
+    return this.strategies.list({ project, category, status })
+  }
+
+  @Get(":id")
+  show(@Param("id") id: string) {
+    return this.strategies.get(id)
+  }
+
+  @Post()
+  add(@Body() body: StrategyCreateDto, @Actor() actor: string) {
+    return this.strategies.add(body, actor)
+  }
+
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() body: StrategyPatchDto,
+    @Actor() actor: string
+  ) {
+    return this.strategies.update(id, body, actor)
+  }
+}
+
+/** Growth view of learnings and decisions with category (the shorts routes stay unchanged). */
+@Controller("knowledge")
+export class KnowledgeController {
+  constructor(private readonly knowledge: KnowledgeService) {}
+
+  @Get()
+  list(
+    @Query("project") project?: string,
+    @Query("category") category?: string,
+    @Query("type") type?: string,
+    @Query("status") status?: string
+  ) {
+    return this.knowledge.list({ project, category, type, status })
+  }
+
+  @Patch(":type/:id")
+  setCategory(
+    @Param("type") type: string,
+    @Param("id") id: string,
+    @Body() body: KnowledgePatchDto,
+    @Actor() actor: string
+  ) {
+    return this.knowledge.setCategory(
+      type,
+      idParam(id, type === "decision" ? "Entscheidungs" : "Learning"),
+      body.category,
+      actor
+    )
+  }
+}
+
+@Controller("app")
+export class AppController {
+  constructor(
+    private readonly inbox: AppInboxService,
+    private readonly publisher: AppPublishService
+  ) {}
+
+  @Get("inbox")
+  list(
+    @Query("project") project?: string,
+    @Query("type") type?: string,
+    @Query("needsReply") needsReply?: string,
+    @Query("limit") limit?: string
+  ) {
+    return this.inbox.inbox({
+      project,
+      type,
+      needsReply:
+        needsReply === undefined || needsReply === ""
+          ? undefined
+          : boolParam(needsReply),
+      limit: intParam(limit, "limit"),
+    })
+  }
+
+  @Post("publish")
+  @HttpCode(200)
+  publish(@Body() body: AppPublishDto, @Actor() actor: string) {
+    return this.publisher.publish(body, actor)
   }
 }
 

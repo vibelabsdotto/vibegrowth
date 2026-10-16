@@ -5,12 +5,14 @@ import { app } from "./definitions/app"
 import { asc } from "./definitions/asc"
 import { audit } from "./definitions/audit"
 import { bing } from "./definitions/bing"
+import { featurama } from "./definitions/featurama"
 import { ga4 } from "./definitions/ga4"
 import { geoChatgpt } from "./definitions/geo-chatgpt"
 import { gsc } from "./definitions/gsc"
 import { health } from "./definitions/health"
 import { play } from "./definitions/play"
 import { psi } from "./definitions/psi"
+import { reviews } from "./definitions/reviews"
 
 /** All collectors in display order (CONTRACT §7.2). New collector: one file in definitions/ + one entry here. */
 export const COLLECTORS: readonly CollectorDefinition[] = [
@@ -23,6 +25,8 @@ export const COLLECTORS: readonly CollectorDefinition[] = [
   app,
   play,
   asc,
+  reviews,
+  featurama,
   geoChatgpt,
 ]
 

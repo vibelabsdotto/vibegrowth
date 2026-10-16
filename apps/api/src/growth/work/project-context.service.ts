@@ -2,11 +2,19 @@ import { Injectable } from "@nestjs/common"
 import { and, desc, eq, gte, inArray, lte, ne } from "drizzle-orm"
 import { listAccounts, listRules } from "../../core/catalog"
 import { activeFormat } from "../../core/context"
+import { knowledgeCategory } from "../../core/category"
 import { listDecisions, listLearnings } from "../../core/knowledge"
 import { horizon } from "../../core/plan"
-import { approvals, experiments, kpiDaily } from "../../core/schema"
+import {
+  approvals,
+  decisions as decisionsTable,
+  experiments,
+  kpiDaily,
+  learnings as learningsTable,
+} from "../../core/schema"
 import { addDays, assertDate, today } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
+import { AppInboxService } from "./app-inbox.service"
 import { approvalOut } from "./approvals.service"
 import { BacklogService } from "./backlog.service"
 import { ChangesService } from "./changes.service"
@@ -27,6 +35,7 @@ import {
 } from "./overview.service"
 import { relChange, requireProject, round } from "./shared"
 import { StoreService } from "./store.service"
+import { StrategiesService } from "./strategies.service"
 
 /**
  * `context --project`: everything an agent run needs for one project in one call, read-only
@@ -42,7 +51,9 @@ export class ProjectContextService {
     private readonly experiments: ExperimentsService,
     private readonly changes: ChangesService,
     private readonly geo: GeoService,
-    private readonly store: StoreService
+    private readonly store: StoreService,
+    private readonly strategies: StrategiesService,
+    private readonly inbox: AppInboxService
   ) {}
 
   private get ctx() {
@@ -188,6 +199,29 @@ export class ProjectContextService {
       scopeId: p.id,
       status: "active",
     })
+    // Growth view: learnings and decisions with their category (stored or derived).
+    const learningCats = new Map(
+      ctx.db
+        .select({
+          id: learningsTable.id,
+          category: learningsTable.category,
+          scopeType: learningsTable.scopeType,
+        })
+        .from(learningsTable)
+        .all()
+        .map((l) => [l.id, knowledgeCategory(l)])
+    )
+    const decisionCats = new Map(
+      ctx.db
+        .select({
+          id: decisionsTable.id,
+          category: decisionsTable.category,
+          scopeType: decisionsTable.scopeType,
+        })
+        .from(decisionsTable)
+        .all()
+        .map((d) => [d.id, knowledgeCategory(d)])
+    )
     const learnings = [
       ...listLearnings(ctx, {
         scopeType: "brand",
@@ -196,7 +230,9 @@ export class ProjectContextService {
       }),
       ...listLearnings(ctx, { scopeType: "global", status: "active" }),
       ...listLearnings(ctx, { scopeType: "growth", status: "active" }),
-    ].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+    ]
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+      .map((l) => ({ ...l, category: learningCats.get(l.id) ?? "general" }))
     const decisions = listDecisions(ctx)
       .filter(
         (d) =>
@@ -205,6 +241,9 @@ export class ProjectContextService {
           d.scopeType === "growth"
       )
       .slice(0, 20)
+      .map((d) => ({ ...d, category: decisionCats.get(d.id) ?? "general" }))
+    const strategies = this.strategies.activeByCategory(p.id)
+    const appInbox = this.inbox.inbox({ project: p.id, limit: 1 }).counts
 
     const shortsAccounts = listAccounts(ctx, { brandId: p.id }).map((a) => {
       const active = activeFormat(ctx, a.id, date)
@@ -259,6 +298,12 @@ export class ProjectContextService {
       warnings.push(`Letztes Audit: ${audit.openErrors.length} offene Fehler.`)
     if (!questions.length)
       warnings.push('Keine aktiven GEO-Fragen. Mit "geo question add" anlegen.')
+    const open =
+      appInbox.featureRequests.needsReply + appInbox.reviews.needsReply
+    if (open)
+      warnings.push(
+        `App-Inbox: ${appInbox.featureRequests.needsReply} Feature-Requests und ${appInbox.reviews.needsReply} Bewertungen ohne Antwort ("app inbox --project ${p.id} --needs-reply").`
+      )
 
     return {
       generatedAt: new Date().toISOString(),
@@ -291,6 +336,8 @@ export class ProjectContextService {
       rules,
       learnings,
       decisions,
+      strategies,
+      appInbox,
       shorts: { accounts: shortsAccounts },
       warnings,
     }

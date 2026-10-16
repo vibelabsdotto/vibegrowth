@@ -1,5 +1,10 @@
 import { Injectable } from "@nestjs/common"
 import { and, desc, eq, gte, inArray, lte, type SQL } from "drizzle-orm"
+import {
+  categoryFilter,
+  categoryInput,
+  changeCategory,
+} from "../../core/category"
 import { changes, experiments } from "../../core/schema"
 import {
   assertDate,
@@ -18,6 +23,7 @@ export const CHANGE_KINDS = [
   "store",
   "config",
   "shorts",
+  "reply",
   "other",
 ] as const
 
@@ -32,6 +38,12 @@ export interface ChangeInput {
   ref?: string | null
   experimentId?: number | null
   sourceKey?: string | null
+  category?: string | null
+}
+
+/** Row with its effective category (stored or derived). */
+export function changeOut(r: ChangeRow) {
+  return { ...r, category: changeCategory(r) }
 }
 
 @Injectable()
@@ -49,6 +61,7 @@ export class ChangesService {
     kind?: string
     experiment?: number
     limit?: number
+    category?: string
   }) {
     const conds: SQL[] = []
     if (f.project) conds.push(eq(changes.projectId, f.project))
@@ -59,12 +72,16 @@ export class ChangesService {
     const kinds = listOf(f.kind, CHANGE_KINDS, "kind")
     if (kinds) conds.push(inArray(changes.kind, kinds))
     if (f.experiment) conds.push(eq(changes.experimentId, f.experiment))
-    const q = this.ctx.db
+    const cats = categoryFilter(f.category)
+    const rows = this.ctx.db
       .select()
       .from(changes)
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(changes.date), desc(changes.id))
-    return (f.limit ? q.limit(f.limit) : q).all()
+      .all()
+      .map(changeOut)
+      .filter((r) => !cats || cats.has(r.category))
+    return f.limit ? rows.slice(0, f.limit) : rows
   }
 
   add(input: ChangeInput, actor: string) {
@@ -95,6 +112,7 @@ export class ChangesService {
           experimentId,
           actor,
           sourceKey: input.sourceKey ?? null,
+          category: categoryInput(input.category) ?? null,
         })
         .returning()
         .get()
@@ -105,7 +123,7 @@ export class ChangesService {
         action: "create",
         after: row,
       })
-      return row
+      return changeOut(row)
     })
   }
 }

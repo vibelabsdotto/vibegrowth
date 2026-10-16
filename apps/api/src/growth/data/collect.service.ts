@@ -1,13 +1,14 @@
 import { Injectable, Logger } from "@nestjs/common"
-import { and, asc, eq, inArray, ne } from "drizzle-orm"
+import { and, asc, eq, inArray, isNotNull, ne } from "drizzle-orm"
 import type { CollectorDefinition } from "../../collectors/collector"
 import { CollectorRegistry } from "../../collectors/registry"
 import { errorMessage, type CollectorResult } from "../../collectors/sources"
 import { toolConfig } from "../../core/config"
-import { channels, geoQuestions } from "../../core/schema"
+import { channels, geoQuestions, storeReviews } from "../../core/schema"
 import { nowIso, VGError } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
 import { GeoService } from "../work/geo.service"
+import { AppInboxService } from "../work/app-inbox.service"
 import { StoreService } from "../work/store.service"
 import { AuditService } from "./audit.service"
 import { collectorProject, CollectorsService } from "./collectors.service"
@@ -71,7 +72,8 @@ export class CollectService {
     private readonly search: SearchService,
     private readonly audit: AuditService,
     private readonly geo: GeoService,
-    private readonly store: StoreService
+    private readonly store: StoreService,
+    private readonly inbox: AppInboxService
   ) {}
 
   private get ctx() {
@@ -226,6 +228,24 @@ export class CollectService {
     def: CollectorDefinition,
     extra: { limit?: number }
   ) {
+    if (def.id === "reviews")
+      return {
+        peers: this.peers(project),
+        answeredReviews: Object.fromEntries(
+          this.ctx.db
+            .select({ id: storeReviews.reviewId, at: storeReviews.replyAt })
+            .from(storeReviews)
+            .where(
+              and(
+                eq(storeReviews.projectId, project.id),
+                eq(storeReviews.store, "google_play"),
+                isNotNull(storeReviews.reply)
+              )
+            )
+            .all()
+            .map((r) => [r.id, r.at])
+        ),
+      }
     if (def.id !== "geo-chatgpt") return {}
     const questions = this.ctx.db
       .select({ id: geoQuestions.id, text: geoQuestions.text })
@@ -238,12 +258,17 @@ export class CollectService {
       )
       .orderBy(asc(geoQuestions.id))
       .all()
+    return { questions, peers: this.peers(project), limit: extra.limit }
+  }
+
+  /** Effective configs of play and asc (package, bucket, app id for geo-chatgpt and reviews). */
+  private peers(project: ProjectRow) {
     const peers: Record<string, Record<string, unknown>> = {}
     for (const id of ["play", "asc"]) {
       const peer = this.registry.find(id)
       if (peer) peers[id] = this.collectors.effectiveConfig(project, peer)
     }
-    return { questions, peers, limit: extra.limit }
+    return peers
   }
 
   /** The only channel of a kind the collector serves (e.g. the website), else null. */
@@ -263,7 +288,7 @@ export class CollectService {
     return rows.length === 1 ? rows[0].id : null
   }
 
-  /** Inside tx: kpi_daily, search_daily, audit tables, geo_checks, store_reviews, collector_runs + history. */
+  /** Inside tx: kpi_daily, search_daily, audit tables, geo_checks, store_reviews, feature_requests, collector_runs + history. */
   private write(
     project: ProjectRow,
     def: CollectorDefinition,
@@ -356,6 +381,13 @@ export class CollectService {
     if (result.storeReviews?.length) {
       written.reviews = this.store.upsertReviews(
         result.storeReviews.map((r) => ({ ...r, projectId: project.id })),
+        meta.actor
+      )
+    }
+    if (result.featureRequests?.length) {
+      written.featureRequests = this.inbox.upsertFeatureRequests(
+        project.id,
+        result.featureRequests,
         meta.actor
       )
     }

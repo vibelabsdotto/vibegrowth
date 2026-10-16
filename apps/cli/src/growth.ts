@@ -3,6 +3,7 @@ import { Option, type Command } from "commander"
 import {
   api,
   int,
+  list,
   nullable,
   parseJsonOption,
   readJsonInput,
@@ -30,6 +31,8 @@ const APPROVAL_KIND = [
   "draft",
   "store_text",
   "strategy",
+  "reply",
+  "task",
   "other",
 ]
 const APPROVAL_STATUS = [
@@ -56,7 +59,17 @@ const CONTENT_STATUS = [
   "live",
   "discarded",
 ]
-const BACKLOG_KIND = ["seo", "tech", "content", "store", "growth", "other"]
+const BACKLOG_KIND = [
+  "seo",
+  "tech",
+  "content",
+  "store",
+  "growth",
+  "bug",
+  "feature",
+  "ux",
+  "other",
+]
 const BACKLOG_STATUS = ["open", "doing", "done", "dropped"]
 const EXP_TARGET = ["page", "post", "store", "other"]
 const EXP_STATUS = ["running", "evaluated", "stopped"]
@@ -68,10 +81,24 @@ const CHANGE_KIND = [
   "store",
   "config",
   "shorts",
+  "reply",
   "other",
 ]
 const MENTION_STATUS = ["new", "contacted", "listed", "rejected", "ignored"]
 const SEARCH_SOURCE = ["gsc", "bing"]
+const CATEGORY = ["web", "shortform", "app", "general"]
+const CATEGORY_HELP = "web, shortform, app, general; kommagetrennt"
+const STRATEGY_CATEGORY = ["web", "app", "general"]
+const STRATEGY_STATUS = ["active", "paused", "retired"]
+
+/** --category on add/update: one value, "none" clears it (derived again). */
+const categoryOption = () =>
+  new Option(
+    "--category <category>",
+    "web, shortform, app, general (none = abgeleitet)"
+  ).choices([...CATEGORY, "none"])
+const categoryValue = (v?: string) =>
+  v === undefined ? undefined : v === "none" ? null : v
 
 const choice = (flags: string, values: string[], description?: string) =>
   new Option(flags, description).choices(values)
@@ -471,13 +498,24 @@ export function registerGrowth(program: Command) {
     )
     .option("--project <id>")
     .option("--account <id>")
+    .option("--kind <list>", `${APPROVAL_KIND.join(", ")}, kommagetrennt`)
+    .option("--category <list>", CATEGORY_HELP)
     .action(
-      run((o: { status: string; project?: string; account?: string }) =>
-        api.get("/approvals", {
-          status: o.status,
-          project: o.project,
-          account: o.account,
-        })
+      run(
+        (o: {
+          status: string
+          project?: string
+          account?: string
+          kind?: string
+          category?: string
+        }) =>
+          api.get("/approvals", {
+            status: o.status,
+            project: o.project,
+            account: o.account,
+            kind: o.kind,
+            category: o.category,
+          })
       )
     )
   approvalsCmd
@@ -491,10 +529,15 @@ export function registerGrowth(program: Command) {
     .requiredOption("--title <text>")
     .option("--body <markdown>", "Begründung und Vorschlag als Markdown")
     .option("--body-file <path>", "Body aus Datei, - für stdin")
-    .option("--payload <json>", "strukturierter Vorschlag als JSON")
+    .option(
+      "--payload <json>",
+      "strukturierter Vorschlag als JSON (Pflicht bei reply und task)"
+    )
+    .option("--payload-file <path>", "Payload aus Datei, - für stdin")
     .option("--account <id>")
     .addOption(choice("--ref-type <type>", REF_TYPE))
     .option("--ref-id <id>")
+    .addOption(categoryOption())
     .action(
       run(
         (o: {
@@ -504,10 +547,17 @@ export function registerGrowth(program: Command) {
           body?: string
           bodyFile?: string
           payload?: string
+          payloadFile?: string
           account?: string
           refType?: string
           refId?: string
+          category?: string
         }) => {
+          if (o.payload !== undefined && o.payloadFile !== undefined)
+            throw new CliError(
+              "INVALID",
+              "payload nur über eine Option: --payload oder --payload-file"
+            )
           if ((o.refType === undefined) !== (o.refId === undefined))
             throw new CliError(
               "INVALID",
@@ -520,11 +570,14 @@ export function registerGrowth(program: Command) {
             title: o.title,
             body: textOrFile(o.body, o.bodyFile, "body"),
             payload:
-              o.payload === undefined
-                ? undefined
-                : parseJsonOption(o.payload, "--payload"),
+              o.payloadFile !== undefined
+                ? parseJsonOption(readText(o.payloadFile), "--payload-file")
+                : o.payload === undefined
+                  ? undefined
+                  : parseJsonOption(o.payload, "--payload"),
             refType: o.refType,
             refId: o.refId,
+            category: categoryValue(o.category),
           })
         }
       )
@@ -536,6 +589,14 @@ export function registerGrowth(program: Command) {
     .option("--reject")
     .option("--changes", "Änderung erbeten")
     .option("--note <text>")
+    .option(
+      "--text <text>",
+      "geänderter Antworttext (nur reply, mit --approve)"
+    )
+    .option(
+      "--text-file <path>",
+      "geänderter Antworttext aus Datei, - für stdin"
+    )
     .action(
       run(
         (
@@ -545,6 +606,8 @@ export function registerGrowth(program: Command) {
             reject?: boolean
             changes?: boolean
             note?: string
+            text?: string
+            textFile?: string
           }
         ) => {
           const picked = [
@@ -560,6 +623,7 @@ export function registerGrowth(program: Command) {
           return api.post(`/approvals/${seg(id)}/decide`, {
             decision: picked[0],
             note: o.note,
+            text: textOrFile(o.text, o.textFile, "text"),
           })
         }
       )
@@ -579,13 +643,21 @@ export function registerGrowth(program: Command) {
     .option("--project <id>")
     .option("--status <list>", `${CONTENT_STATUS.join(", ")}, kommagetrennt`)
     .option("--kind <list>", `${CONTENT_KIND.join(", ")}, kommagetrennt`)
+    .option("--category <list>", CATEGORY_HELP)
     .action(
-      run((o: { project?: string; status?: string; kind?: string }) =>
-        api.get("/content", {
-          project: o.project,
-          status: o.status,
-          kind: o.kind,
-        })
+      run(
+        (o: {
+          project?: string
+          status?: string
+          kind?: string
+          category?: string
+        }) =>
+          api.get("/content", {
+            project: o.project,
+            status: o.status,
+            kind: o.kind,
+            category: o.category,
+          })
       )
     )
   contentCmd
@@ -606,6 +678,7 @@ export function registerGrowth(program: Command) {
       .option("--approval <id>", "Freigabe", int)
       .option("--notes <text>")
       .option("--position <n>", "", int)
+      .addOption(categoryOption())
   }
   type ContentOpts = {
     title?: string
@@ -622,8 +695,10 @@ export function registerGrowth(program: Command) {
     approval?: number
     notes?: string
     position?: number
+    category?: string
   }
   const contentPatch = (o: ContentOpts) => ({
+    category: categoryValue(o.category),
     title: o.title,
     kind: o.kind,
     channelId: nullable(o.channel),
@@ -667,9 +742,22 @@ export function registerGrowth(program: Command) {
     .command("list", { isDefault: true })
     .option("--project <id>")
     .option("--status <list>", `${BACKLOG_STATUS.join(", ")}, kommagetrennt`)
+    .option("--kind <list>", `${BACKLOG_KIND.join(", ")}, kommagetrennt`)
+    .option("--category <list>", CATEGORY_HELP)
     .action(
-      run((o: { project?: string; status?: string }) =>
-        api.get("/backlog", { project: o.project, status: o.status })
+      run(
+        (o: {
+          project?: string
+          status?: string
+          kind?: string
+          category?: string
+        }) =>
+          api.get("/backlog", {
+            project: o.project,
+            status: o.status,
+            kind: o.kind,
+            category: o.category,
+          })
       )
     )
   function backlogOptions(cmd: Command) {
@@ -681,6 +769,8 @@ export function registerGrowth(program: Command) {
       .option("--source <text>", "woher (Audit, GSC, Max …)")
       .option("--done-ref <ref>", "Commit, URL oder Änderung")
       .option("--position <n>", "", int)
+      .addOption(categoryOption())
+      .option("--notion-url <url>", "Notion-Ticket (App-Aufgaben)")
   }
   type BacklogOpts = {
     title?: string
@@ -692,8 +782,12 @@ export function registerGrowth(program: Command) {
     source?: string
     doneRef?: string
     position?: number
+    category?: string
+    notionUrl?: string
   }
   const backlogPatch = (o: BacklogOpts) => ({
+    category: categoryValue(o.category),
+    notionUrl: nullable(o.notionUrl),
     title: o.title,
     detail: nullable(o.detail),
     kind: o.kind,
@@ -735,9 +829,14 @@ export function registerGrowth(program: Command) {
     .command("list", { isDefault: true })
     .option("--project <id>")
     .option("--status <list>", `${EXP_STATUS.join(", ")}, kommagetrennt`)
+    .option("--category <list>", CATEGORY_HELP)
     .action(
-      run((o: { project?: string; status?: string }) =>
-        api.get("/experiments", { project: o.project, status: o.status })
+      run((o: { project?: string; status?: string; category?: string }) =>
+        api.get("/experiments", {
+          project: o.project,
+          status: o.status,
+          category: o.category,
+        })
       )
     )
   expCmd
@@ -752,6 +851,7 @@ export function registerGrowth(program: Command) {
       .option("--channel <id>")
       .option("--baseline-days <n>", "", int)
       .option("--eval-days <n>", "", int)
+      .addOption(categoryOption())
   }
   type ExpOpts = {
     title?: string
@@ -765,8 +865,10 @@ export function registerGrowth(program: Command) {
     evalDays?: number
     status?: string
     verdict?: string
+    category?: string
   }
   const expPatch = (o: ExpOpts) => ({
+    category: categoryValue(o.category),
     title: o.title,
     hypothesis: nullable(o.hypothesis),
     channelId: nullable(o.channel),
@@ -833,14 +935,22 @@ export function registerGrowth(program: Command) {
     .option("--from <date>")
     .option("--to <date>")
     .addOption(choice("--kind <kind>", CHANGE_KIND))
+    .option("--category <list>", CATEGORY_HELP)
     .action(
       run(
-        (o: { project?: string; from?: string; to?: string; kind?: string }) =>
+        (o: {
+          project?: string
+          from?: string
+          to?: string
+          kind?: string
+          category?: string
+        }) =>
           api.get("/changes", {
             project: o.project,
             from: o.from,
             to: o.to,
             kind: o.kind,
+            category: o.category,
           })
       )
     )
@@ -853,6 +963,7 @@ export function registerGrowth(program: Command) {
     .option("--exp <id>", "zugehöriges Experiment", int)
     .option("--channel <id>")
     .option("--date <date>", "Standard heute")
+    .addOption(categoryOption())
     .action(
       run(
         (o: {
@@ -863,6 +974,7 @@ export function registerGrowth(program: Command) {
           exp?: number
           channel?: string
           date?: string
+          category?: string
         }) =>
           api.post("/changes", {
             projectId: o.project,
@@ -872,6 +984,7 @@ export function registerGrowth(program: Command) {
             summary: o.summary,
             ref: o.ref,
             experimentId: o.exp,
+            category: categoryValue(o.category),
           })
       )
     )
@@ -1044,13 +1157,187 @@ export function registerGrowth(program: Command) {
     .requiredOption("--project <id>")
     .option("--store <store>", "app_store oder google_play")
     .option("--limit <n>", "", int, 20)
+    .option("--needs-reply", "nur Bewertungen ohne Antwort")
     .action(
-      run((o: { project: string; store?: string; limit: number }) =>
-        api.get("/store/reviews", {
+      run(
+        (o: {
+          project: string
+          store?: string
+          limit: number
+          needsReply?: boolean
+        }) =>
+          api.get("/store/reviews", {
+            project: o.project,
+            store: o.store,
+            limit: o.limit,
+            needsReply: o.needsReply,
+          })
+      )
+    )
+
+  // ---------- strategies, knowledge, app ----------
+
+  const strategiesCmd = program
+    .command("strategies")
+    .alias("strategy")
+    .description(
+      "Strategien je Projekt und Kategorie; Shortform-Strategien sind die Formate (kind format)"
+    )
+  strategiesCmd
+    .command("list", { isDefault: true })
+    .option("--project <id>", "Projekt (dazu projektübergreifende)")
+    .option("--category <list>", CATEGORY_HELP)
+    .option("--status <list>", `${STRATEGY_STATUS.join(", ")}, kommagetrennt`)
+    .action(
+      run((o: { project?: string; category?: string; status?: string }) =>
+        api.get("/strategies", {
           project: o.project,
-          store: o.store,
-          limit: o.limit,
+          category: o.category,
+          status: o.status,
         })
+      )
+    )
+  strategiesCmd
+    .command("show <id>")
+    .description("Strategie mit Leitfaden (Format-ID: Format als Strategie)")
+    .action(run((id: string) => api.get(`/strategies/${seg(id)}`)))
+  function strategyOptions(cmd: Command) {
+    return cmd
+      .option("--summary <text>")
+      .option("--guide <markdown>", "Vorgehen, Signale, Abnahme")
+      .option("--guide-file <path>", "Leitfaden aus Datei, - für stdin")
+      .addOption(choice("--status <status>", STRATEGY_STATUS))
+      .option("--skills <list>", "Skills, kommagetrennt")
+      .option("--source <text>", "woher (Max, Chat, Datum …)")
+  }
+  type StrategyOpts = {
+    project?: string
+    category?: string
+    name?: string
+    summary?: string
+    guide?: string
+    guideFile?: string
+    status?: string
+    skills?: string
+    source?: string
+  }
+  const strategyPatch = (o: StrategyOpts) => ({
+    projectId: nullable(o.project),
+    category: o.category,
+    name: o.name,
+    summary: nullable(o.summary),
+    guide: nullable(textOrFile(o.guide, o.guideFile, "guide")),
+    status: o.status,
+    skills: o.skills === undefined ? undefined : (list(o.skills) ?? []),
+    source: nullable(o.source),
+  })
+  strategyOptions(
+    strategiesCmd
+      .command("add")
+      .option("--id <id>", "Standard: aus dem Namen")
+      .option("--project <id>", "leer = für alle Projekte")
+      .addOption(
+        choice("--category <category>", STRATEGY_CATEGORY).makeOptionMandatory()
+      )
+      .requiredOption("--name <name>")
+  ).action(
+    run((o: StrategyOpts & { id?: string }) =>
+      api.post("/strategies", { id: o.id, ...strategyPatch(o) })
+    )
+  )
+  strategyOptions(
+    strategiesCmd
+      .command("update <id>")
+      .option("--project <id>", '"" = für alle Projekte')
+      .addOption(choice("--category <category>", STRATEGY_CATEGORY))
+      .option("--name <name>")
+  ).action(
+    run((id: string, o: StrategyOpts) =>
+      api.patch(`/strategies/${seg(id)}`, strategyPatch(o))
+    )
+  )
+
+  const knowledgeCmd = program
+    .command("knowledge")
+    .description("Learnings und Entscheidungen mit Kategorie (Growth-Sicht)")
+  knowledgeCmd
+    .command("list", { isDefault: true })
+    .option("--project <id>", "Projekt (dazu global und growth)")
+    .option("--category <list>", CATEGORY_HELP)
+    .addOption(choice("--type <type>", ["learning", "decision"]))
+    .option("--status <status>", "Learnings: active (Standard), outdated, all")
+    .action(
+      run(
+        (o: {
+          project?: string
+          category?: string
+          type?: string
+          status?: string
+        }) =>
+          api.get("/knowledge", {
+            project: o.project,
+            category: o.category,
+            type: o.type,
+            status: o.status,
+          })
+      )
+    )
+  knowledgeCmd
+    .command("update <type> <id>")
+    .description("Kategorie eines Learnings oder einer Entscheidung setzen")
+    .addOption(categoryOption().makeOptionMandatory())
+    .action(
+      run((type: string, id: string, o: { category: string }) =>
+        api.patch(`/knowledge/${seg(type)}/${seg(id)}`, {
+          category: categoryValue(o.category),
+        })
+      )
+    )
+
+  const appCmd = program
+    .command("app")
+    .description(
+      "App-Inbox (Featurama-Requests, Store-Bewertungen) und Veröffentlichen freigegebener Antworten"
+    )
+  appCmd
+    .command("inbox")
+    .description("Feature-Requests und Bewertungen mit Antwortstatus")
+    .requiredOption("--project <id>")
+    .addOption(choice("--type <type>", ["feature_request", "review"]))
+    .option("--needs-reply", "nur, was eine Antwort braucht")
+    .option("--limit <n>", "Standard 200", int)
+    .action(
+      run(
+        (o: {
+          project: string
+          type?: string
+          needsReply?: boolean
+          limit?: number
+        }) =>
+          api.get("/app/inbox", {
+            project: o.project,
+            type: o.type,
+            needsReply: o.needsReply,
+            limit: o.limit,
+          })
+      )
+    )
+  appCmd
+    .command("publish")
+    .description(
+      "Freigegebene, noch nicht veröffentlichte Antworten posten (Exit 2 bei Fehlern)"
+    )
+    .option("--project <id>")
+    .option("--dry-run", "nur frisch lesen und zeigen, was gepostet würde")
+    .action(
+      run(
+        (o: { project?: string; dryRun?: boolean }) =>
+          api.post(
+            "/app/publish",
+            { project: o.project, dryRun: o.dryRun },
+            true
+          ),
+        { partial: true }
       )
     )
 

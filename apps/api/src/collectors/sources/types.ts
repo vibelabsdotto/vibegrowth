@@ -100,6 +100,46 @@ export interface StoreReviewRow {
   language?: string | null;
   version?: string | null;
   reply?: string | null;
+  /** Last change of the user review (ISO). */
+  lastModified?: string | null;
+  /** Last change of the developer reply (ISO). */
+  replyAt?: string | null;
+  /** Apple response state (PUBLISHED, PENDING_PUBLISH). */
+  replyState?: string | null;
+  /** Text review without reply or changed after the reply (StoreService recomputes it). */
+  needsReply?: boolean;
+  /** Earlier id of the same review (play CSV rows before the real review id was read). */
+  legacyId?: string | null;
+}
+
+/** One comment of a Featurama request, without e-mail addresses (author only for developers). */
+export interface FeatureRequestComment {
+  id: string;
+  role: 'user' | 'developer';
+  author: string | null;
+  content: string;
+  createdAt: string;
+}
+
+/** One Featurama feature request (`feature_requests`, written via AppInboxService). */
+export interface FeatureRequestRow {
+  featuramaProjectId: string;
+  requestId: string;
+  title: string;
+  body: string | null;
+  status: string | null;
+  votes: number;
+  approved: boolean;
+  platform: string | null;
+  appVersion: string | null;
+  requestedAt: string | null;
+  lastUserCommentAt: string | null;
+  lastDeveloperCommentAt: string | null;
+  needsReply: boolean;
+  commentCount: number;
+  /** null = not read in this run, keep the stored thread */
+  comments: FeatureRequestComment[] | null;
+  url: string;
 }
 
 export interface CollectorResult {
@@ -109,6 +149,7 @@ export interface CollectorResult {
   audit?: AuditResult;
   geoChecks?: GeoCheckRow[];
   storeReviews?: StoreReviewRow[];
+  featureRequests?: FeatureRequestRow[];
   /**
    * Date window the source was asked for (inclusive). Rows of this source inside the window are
    * complete, so the writer may replace them (growth.py deletes GA4 event params from `start` on).

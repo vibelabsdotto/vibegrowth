@@ -2,6 +2,11 @@ import { Injectable } from "@nestjs/common"
 import { and, asc, eq, gte, inArray, lte, type SQL } from "drizzle-orm"
 import path from "node:path"
 import {
+  categoryFilter,
+  categoryInput,
+  contentCategory,
+} from "../../core/category"
+import {
   approvals,
   contentItems,
   kpiDaily,
@@ -57,6 +62,12 @@ export interface ContentInput {
   notes?: string | null
   position?: number
   sourceKey?: string | null
+  category?: string | null
+}
+
+/** Row with its effective category (stored or derived). */
+export function contentOut(r: ContentRow) {
+  return { ...r, category: contentCategory(r) }
 }
 
 export type ContentPatch = Partial<
@@ -89,7 +100,13 @@ export class ContentService {
     return this.database.ctx
   }
 
-  list(f: { project?: string; status?: string; kind?: string }) {
+  list(f: {
+    project?: string
+    status?: string
+    kind?: string
+    category?: string
+  }) {
+    const cats = categoryFilter(f.category)
     const conds: SQL[] = []
     if (f.project) conds.push(eq(contentItems.projectId, f.project))
     const statuses = listOf(f.status, CONTENT_STATUS, "status")
@@ -106,6 +123,8 @@ export class ContentService {
         asc(contentItems.id)
       )
       .all()
+      .map(contentOut)
+      .filter((r) => !cats || cats.has(r.category))
       .sort(
         (a, b) =>
           a.projectId.localeCompare(b.projectId) ||
@@ -129,7 +148,7 @@ export class ContentService {
     if (item.approvalId && !ids.has(item.approvalId))
       linked.push(getById(this.ctx, approvals, item.approvalId, "Freigabe"))
     return {
-      ...item,
+      ...contentOut(item),
       approvals: linked
         .sort((a, b) => a.id - b.id)
         .map((a) => ({
@@ -298,6 +317,7 @@ export class ContentService {
         position: input.position ?? 0,
         actor,
         sourceKey: input.sourceKey ?? null,
+        category: categoryInput(input.category) ?? null,
       }
       const row = ctx.db.insert(contentItems).values(values).returning().get()
       recordHistory(ctx, {
@@ -307,7 +327,7 @@ export class ContentService {
         action: "create",
         after: row,
       })
-      return row
+      return contentOut(row)
     })
   }
 
@@ -346,7 +366,10 @@ export class ContentService {
         !item.liveDate
       )
         patch.liveDate = today()
-      return patchRow(ctx, contentItems, "content", id, patch, actor)
+      if (p.category !== undefined) patch.category = categoryInput(p.category)
+      return contentOut(
+        patchRow(ctx, contentItems, "content", id, patch, actor)
+      )
     })
   }
 }

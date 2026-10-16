@@ -30,6 +30,8 @@ export interface CollectorRunOptions {
   limit?: number
   /** Effective configs of the project's other collectors (e.g. play.package for geo-chatgpt). */
   peers?: Record<string, Record<string, unknown>>
+  /** reviews: stored Google reviews with a reply (review id → reply time). */
+  answeredReviews?: Record<string, string | null>
 }
 
 /**

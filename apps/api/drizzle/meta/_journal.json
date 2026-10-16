@@ -43,6 +43,13 @@
       "when": 1792093609941,
       "tag": "0005_growth_learning_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792109320660,
+      "tag": "0006_categories_strategies_app_inbox",
+      "breakpoints": true
     }
   ]
 }

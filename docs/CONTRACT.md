@@ -13,7 +13,7 @@ Echos Crons rufen täglich ab 05:50 `vibeshorts … --json --actor …` auf. Des
 - gleiche Exit-Codes: `0` ok, `1` Fehler, `2` Teilfehler (`metrics pull` mit `errors.length > 0`), `3` `LOCKED`;
 - Fehler mit `--json` auf stdout als `{"error":{"code","message"}}`, ohne `--json` auf stderr als `Fehler (<code>): <message>`; gleiche Fehlertexte.
 
-Prüfung: alte und neue CLI gegen dieselbe DB-Kopie laufen lassen und vergleichen. Werkzeuge in `~/.hermes/profiles/byte/cache/scratch/vibegrowth-baseline/`: `snap.sh <bin> <outdir>` sammelt die Lese-Ausgaben, `python3 cmp.py <dir-a> <dir-b>` vergleicht sie ohne `generatedAt`. Referenz ist die alte CLI in `.hermes/frozen/bin/vibeshorts.mjs` (VibeShorts vor dem Umbau, liest die DB direkt, DB per `VIBESHORTS_DB`); die neue CLI läuft gegen eine Dev-API mit `VIBEGROWTH_DB` auf derselben Kopie. Ziel: `diffs: 0`.
+Prüfung: alte und neue CLI gegen dieselbe DB-Kopie laufen lassen und vergleichen. Werkzeuge in `~/.hermes/profiles/byte/cache/scratch/vibegrowth-baseline/`: `snap.sh <bin> <outdir>` sammelt die Lese-Ausgaben, `python3 cmp.py <dir-a> <dir-b>` vergleicht sie ohne `generatedAt`. Referenz war bis zum Umbau die alte CLI in `.hermes/frozen/bin/vibeshorts.mjs`; dieser Stand existiert nicht mehr. Seitdem ist die Referenz ein Build von `HEAD` vor der Änderung (`git archive HEAD` in den Scratch-Ordner, dort bauen), der als Dev-API auf einer eigenen Kopie derselben DB-Sicherung läuft; der neue Stand läuft ebenso auf einer zweiten Kopie (mit seiner Migration). Ziel: `diffs: 0` und byte-gleiche Dateien ohne `generatedAt`.
 
 Produktionsdatenbank: `/Users/maxmannstein/VibeLabs/shortform-content/.vibeshorts/vibeshorts.db`. Entwicklung und Proben arbeiten nie darauf, sondern auf einer Kopie (§9).
 
@@ -25,12 +25,15 @@ Produktionsdatenbank: `/Users/maxmannstein/VibeLabs/shortform-content/.vibeshort
 - **KPI**: Tageswert einer Quelle (`kpi_daily`). Basis für Funnel, Übersicht und Experimente.
 - **Freigabe** („Wartet auf Max“): Vorschlag eines Agents, den nur der Akteur `max` entscheidet (Tabelle `approvals`).
 - **Akteur**: wer schreibt. CLI `--actor` (Default `agent`; die Env `VIBEGROWTH_ACTOR`/`VIBESHORTS_ACTOR` setzt ihn ebenfalls), Browser immer `max`.
+- **Kategorie** (Bereich): `web`, `shortform`, `app` oder `general` (Allgemein). Jede Growth-Zeile hat eine, gespeichert oder abgeleitet (§7.9).
+- **Strategie**: Vorgehen pro Projekt und Kategorie (Tabelle `strategies`). Shortform-Strategien sind die Formate (§7.10).
+- **App-Inbox**: Feature-Requests aus Featurama und Store-Bewertungen mit Antwortstatus (§7.8).
 
 ## 2. Repo-Aufbau
 
 ```text
 apps/api/        NestJS 12 + drizzle + better-sqlite3. Port 4311, bindet nur 127.0.0.1, Präfix /api
-  drizzle/       SQL-Migrationen 0000–0004 + meta/_journal.json
+  drizzle/       SQL-Migrationen 0000–0006 + meta/_journal.json
   renderer/      Python-Renderer, TikTok-Zahlen-Abruf, OFL-Fonts
   src/
     core/        Domänenschicht aus VibeShorts: schema.ts (einzige Schemaquelle), db.ts (Öffnen + Migrator),
@@ -78,7 +81,8 @@ Nur in dieser Schreibweise, ohne `VIBESHORTS_`-Fallback:
 | --- | --- | --- |
 | `VIBEGROWTH_CDP_URL` (Fallback `GROWTH_CDP_URL`) | `http://127.0.0.1:9224` | Automations-Chrome für `geo-chatgpt` |
 | `VIBEGROWTH_PLAY_SA_JSON` (Fallback `GROWTH_PLAY_SA_JSON`) | `~/.playconsole-cli/config.json` → `credentials_path` | Play-Service-Account |
-| `VIBEGROWTH_ASC_BIN` | `asc` | asc-CLI für den Collector `asc` |
+| `VIBEGROWTH_ASC_BIN` | `asc` | asc-CLI für die Collectors `asc` und `reviews` und für `app publish` (App Store) |
+| `VIBEGROWTH_FEATURAMA_BIN` | `/opt/homebrew/bin/featurama`, sonst `featurama` | Featurama-CLI für den Collector `featurama` und `app publish` (Featurama) |
 | `GOOGLE_PSI_API_KEY` | Datei `google-growth-api-key` | PageSpeed-Key |
 
 ## 4. Transport (API)
@@ -101,7 +105,7 @@ Die Module benennen Projekt- und Referenzfelder im JSON-Body unterschiedlich. Da
 | --- | --- | --- | --- |
 | Shorts | alle Shorts-Routen | camelCase der `core`-Inputs: `accountId`, `brandId`, `formatId`, `planEntryId` …; Ausnahmen wie bisher: `/plan/fill {account}`, `/metrics/pull {account}`, `/characters {account}`, `/hooks {post}` | ohne DTO, `core` prüft |
 | Growth-Daten | `POST /projects` (`id`), `POST /channels`, `POST /collect`, `POST /health-check`, `POST /audit/run`, `POST /geo/run`, `POST /search/sitemap-submit`, `POST /search/bing-submit`, `POST /collectors/app/setup` | `project` (Projekt-ID); `/channels` zusätzlich `externalId`; `/kpi/ingest` Zeilen mit `project` und `channel` | `onlyKeys`: unbekannte Felder → `INVALID` |
-| Growth-Arbeit | `POST /approvals`, `/content`, `/backlog`, `/experiments`, `/changes`, `/geo/questions` | `projectId`, `channelId`, `accountId`, `approvalId`, `experimentId`, `refType`, `refId`, `draftPath`, `urlPath`, `liveDate`, `doneRef`, `targetType`, `startDate`, `baselineDays`, `evalDays`, `sourceKey` | DTO mit `whitelist` + `forbidNonWhitelisted` → `INVALID`. Ausnahme `POST /experiments/evaluate {project?}` |
+| Growth-Arbeit | `POST /approvals`, `/content`, `/backlog`, `/experiments`, `/changes`, `/geo/questions`, `/strategies`, `PATCH /knowledge/:type/:id` | `projectId`, `channelId`, `accountId`, `approvalId`, `experimentId`, `refType`, `refId`, `draftPath`, `urlPath`, `liveDate`, `doneRef`, `notionUrl`, `targetType`, `startDate`, `baselineDays`, `evalDays`, `sourceKey`, `category` | DTO mit `whitelist` + `forbidNonWhitelisted` → `INVALID`. Ausnahmen `POST /experiments/evaluate {project?}` und `POST /app/publish {project?, dryRun?}` |
 | GEO-Checks | `POST /geo/checks {checks:[…]}` | je Check `projectId` oder `project`, `questionId` oder `question` (Fragetext) | DTO |
 | Import | `POST /import/growth` | `db`, `sites`, `workspaceRoot` | eigene Prüfung |
 
@@ -164,6 +168,8 @@ Migrationen: Ledger ist die Tabelle `_migrations(tag, applied_at)`; der Migrator
 | `0000_init`, `0001_format_guide_skills_examples`, `0002_plan_format_follows_account` | VibeShorts-Bestand |
 | `0003_projects_growth` | `brands` → `projects` mit neuen Spalten, alle Growth-Tabellen |
 | `0004_import_source_keys` | `source_key` TEXT + UNIQUE-Index auf `audit_runs` und `collector_runs` (für `import-growth`) |
+| `0005_growth_learning_scope` | Scope `growth` für Learnings und Entscheidungen |
+| `0006_categories_strategies_app_inbox` | `category` TEXT NULL an `learnings`, `decisions`, `experiments`, `backlog_items`, `approvals`, `changes`, `content_items`; `backlog_items.notion_url`; `store_reviews.last_modified`, `reply_at`, `reply_state`, `needs_reply`; neue Tabellen `strategies`, `feature_requests`. Nur `ADD COLUMN`/`CREATE TABLE`, keine Rebuilds |
 
 Alle neuen Tabellen: `created_at`/`updated_at` TEXT ISO wie im Bestand, JSON-Spalten als TEXT mit Default `'[]'`/`'{}'`, `source_key` TEXT UNIQUE wo importiert wird.
 
@@ -185,7 +191,11 @@ Alle neuen Tabellen: `created_at`/`updated_at` TEXT ISO wie im Bestand, JSON-Spa
 | `geo_questions` | `id` PK, `project_id`, `text`, `active` INT bool Default 1, `source_key`; UNIQUE(`project_id`, `text`) |
 | `geo_checks` | `id` PK, `project_id`, `question_id` → geo_questions, `date`, `engine`, `status` (`ok\|error`), `mentioned` INT bool, `position` INT NULL, `cited` INT bool, `in_sources` INT bool, `brands` JSON, `competitors` JSON, `links` JSON, `cited_urls` JSON, `sources` JSON, `answer`, `model`, `evidence` (Pfad), `meta` JSON, `error`, `source_key`; UNIQUE(`project_id`, `question_id`, `date`, `engine`) |
 | `mention_targets` | `id` PK, `project_id`, `domain`, `url`, `kind` (`app_store\|comparison\|guide\|forum\|press\|vendor\|other`), `seen_count`, `cited_count`, `first_seen`, `last_seen`, `status` (`new\|contacted\|listed\|rejected\|ignored`), `contact`, `notes`; UNIQUE(`project_id`, `domain`) |
-| `store_reviews` | `id` PK, `project_id`, `store` (`app_store\|google_play`), `review_id`, `date`, `rating` INT, `title`, `body`, `language`, `version`, `reply`; UNIQUE(`project_id`, `store`, `review_id`) |
+| `store_reviews` | `id` PK, `project_id`, `store` (`app_store\|google_play`), `review_id`, `date`, `rating` INT, `title`, `body`, `language` (App Store: Territorium ISO-3, z. B. `DEU`), `version`, `reply`, `last_modified` (letzte Änderung der Bewertung), `reply_at` (letzte Änderung der Antwort), `reply_state` (Apple `PUBLISHED\|PENDING_PUBLISH`), `needs_reply` INT bool; UNIQUE(`project_id`, `store`, `review_id`) |
+| `strategies` | `id` TEXT PK (Slug), `project_id` NULL (= für alle Projekte), `category` (`web\|app\|general`), `name`, `summary`, `guide` (Markdown), `status` (`active\|paused\|retired`, Default `active`), `skills` JSON `'[]'`, `source`, `actor` |
+| `feature_requests` | `id` PK, `project_id`, `featurama_project_id`, `request_id`, `title`, `body`, `status` (Featurama-Status), `votes` INT, `approved` INT bool (in Featurama freigegeben), `platform`, `app_version`, `requested_at`, `last_user_comment_at`, `last_developer_comment_at`, `needs_reply` INT bool, `comment_count` INT, `comments` JSON `[{id, role, author, content, createdAt}]` (`author` nur bei Entwicklern), `url`; UNIQUE(`project_id`, `request_id`). Keine E-Mail-Adressen, keine Geräte-IDs, aus `deviceInfo` nur Plattform und App-Version |
+
+`category` ist an allen sieben Tabellen nullable: `null` heißt abgeleitet (§7.9). `backlog_items.kind` kennt zusätzlich `bug`, `feature`, `ux`; `changes.kind` zusätzlich `reply`; `approvals.kind` zusätzlich `reply`, `task`.
 
 Enums sind Whitelists im Service (`INVALID` sonst), keine CHECK-Constraints, keine Trigger.
 
@@ -208,7 +218,7 @@ Jeder Collector schreibt Tagessummen mit `dims = ''` und darf zusätzlich Aufsch
 
 ### 7.2 Collectors
 
-IDs: `health`, `audit`, `gsc`, `ga4`, `bing`, `psi`, `app`, `play`, `asc`, `geo-chatgpt`. Ein Collector ist eine Datei in `collectors/definitions/` plus ein Eintrag in `registry.ts`: `{id, label, channelKinds, configSchema, secrets, defaults?, run(project, config, options) → {ok, kpi, summary, stats, errors, …}}`. Collectors fassen die DB nie an. Sie liefern normalisierte Zeilen; `CollectService` schreibt sie in einer Transaktion über die Growth-Services (`kpi_daily`, `search_daily`, Audit-Tabellen, `geo_checks`, `store_reviews`) samt `collector_runs`-Zeile und einem `history`-Eintrag.
+IDs: `health`, `audit`, `gsc`, `ga4`, `bing`, `psi`, `app`, `play`, `asc`, `reviews`, `featurama`, `geo-chatgpt`. Ein Collector ist eine Datei in `collectors/definitions/` plus ein Eintrag in `registry.ts`: `{id, label, channelKinds, configSchema, secrets, defaults?, run(project, config, options) → {ok, kpi, summary, stats, errors, …}}`. Collectors fassen die DB nie an. Sie liefern normalisierte Zeilen; `CollectService` schreibt sie in einer Transaktion über die Growth-Services (`kpi_daily`, `search_daily`, Audit-Tabellen, `geo_checks`, `store_reviews`) samt `collector_runs`-Zeile und einem `history`-Eintrag.
 
 Konfiguration pro Projekt in `collectors.config`, gemergt über die `defaults` (Pflichtfelder fett):
 
@@ -223,6 +233,8 @@ Konfiguration pro Projekt in `collectors.config`, gemergt über die `defaults` (
 | `app` | **`ga4Property`**, `firebaseProject`, `funnelEvents`, `keyEvents`, `eventDimensions`, `userDimensions` | Google-OAuth |
 | `play` | **`package`**, **`gcsBucket`** | Play-Service-Account |
 | `asc` | **`appId`**, `providerId`, `profile` (asc-CLI-Profil) | asc-CLI |
+| `reviews` | `package` (Default `play.package`), `gcsBucket` (Default `play.gcsBucket`), `appId` (Default `asc.appId`), `ascProfile` (leer = Standardprofil der asc-CLI), `csvMonths` (3) | Play-Service-Account (Scopes `androidpublisher`, `devstorage.read_only`), asc-CLI |
+| `featurama` | **`featuramaProjectId`**, `context` (Kontext der Featurama-CLI, Default `hosted`) | Featurama-CLI (`~/.config/featurama/config.json`, Token liest nur die CLI) |
 | `geo-chatgpt` | **`brandPatterns`**, `brandPatternsAmbiguous`, `brandContext`, `evidenceDir`, `appStoreId` (Default `asc.appId`), `playPackage` (Default `play.package`), `promptTimeout` (240), `budgetMin` (50), `forceSearch` | Automations-Chrome; Fragen aus `geo_questions` |
 
 Zugänge in `secretsDir` (Dateinamen wie im Growth-System): `google-growth-oauth-client.json` und `google-growth-oauth-token.json` (Google-OAuth für `gsc`, `ga4`, `app`, `search sitemap-submit`, `collectors setup app`), `google-growth-api-key` (`psi`), `bing-webmaster-api-key` (`bing`, `search bing-submit`). Play-Service-Account über `VIBEGROWTH_PLAY_SA_JSON`/`GROWTH_PLAY_SA_JSON` oder `~/.playconsole-cli/config.json` → `credentials_path` des Standardprofils. `asc` über das Profil der asc-CLI. Fehlt ein Zugang, endet der Lauf mit `ok:false` und einer klaren Meldung, ohne Secret-Inhalte. Der OAuth-Refresh schreibt den Token zurück in dieselbe Datei, sonst schreibt VibeGrowth nichts in `secretsDir`.
@@ -272,17 +284,21 @@ Override: Liste (oder `{stages:[…]}`) von `{key, label?, sources?, agg?}` mit 
 | `search keywords --project <id> [--seed <seed…>] [--fast]` | `GET /search/keywords?project=&seed=&fast=`: Google-Autocomplete a–z, nur lesend. Ohne `seed` aus `projects.config.seedKeywords`, Sprache aus `projects.language` (Default `de`) |
 | `audit run --project` / `audit [show] --project [--diff]` | `POST /audit/run {project}`, `GET /audit?project=&diff=` (`diff`: neue und entfallene Befunde gegen den vorherigen Lauf) |
 | `health [--project\|--all]` | `POST /health-check {project?}` (Collector `health` direkt: mit `project` auch, wenn ausgeschaltet, ohne `project` alle Projekte mit eingeschaltetem `health`); CLI Exit 2 bei Befund |
-| `approvals [list] [--status pending] [--project] [--account]\|show <id>\|add …\|decide <id> --approve\|--reject\|--changes [--note]\|withdraw <id>` | `GET /approvals?project=&status=&kind=&account=&limit=` (ohne `status` alle; die CLI schickt Default `pending`; `all` = alle; Listen kommagetrennt), `GET /approvals/:id`, `POST /approvals`, `POST /approvals/:id/decide {decision, note?}` (`decision` `approved\|rejected\|changes_requested`; nur `max`, sonst `LOCKED`), `POST /approvals/:id/withdraw` (nur der anfragende Akteur oder `max`, sonst `LOCKED`) |
-| `content [list] [--project] [--status] [--kind]\|show <id>\|add …\|update <id> …` | `GET /content?project=&status=&kind=`, `GET /content/:id` (bei `live`: Zahlen seit `live_date` aus `search_daily` und `kpi_daily` `ga4:sessions` dims landing), `POST /content`, `PATCH /content/:id` |
-| `backlog [list] [--project] [--status]\|add\|update <id>` | `GET /backlog?project=&status=&kind=`, `GET /backlog/:id` (ohne CLI-Befehl), `POST /backlog`, `PATCH /backlog/:id` |
-| `exp [list]\|show <id>\|add …\|update <id>\|eval [--project]` | `GET /experiments?project=&status=`, `GET /experiments/:id` (mit Tagesreihe der Metrik und `changes` im Zeitraum), `POST /experiments`, `PATCH /experiments/:id`, `POST /experiments/evaluate {project?}` |
-| `changes [list] [--project] [--from] [--to] [--kind]\|add --project --kind --summary [--ref] [--exp] [--channel] [--date]` | `GET /changes?project=&from=&to=&kind=&experiment=&limit=`, `POST /changes` |
+| `approvals [list] [--status pending] [--project] [--account] [--kind] [--category]\|show <id>\|add … [--payload\|--payload-file] [--category]\|decide <id> --approve\|--reject\|--changes [--note] [--text\|--text-file]\|withdraw <id>` | `GET /approvals?project=&status=&kind=&account=&category=&limit=` (ohne `status` alle; die CLI schickt Default `pending`; `all` = alle; Listen kommagetrennt), `GET /approvals/:id`, `POST /approvals` (`reply`/`task`: Payload §7.8), `POST /approvals/:id/decide {decision, note?, text?}` (`decision` `approved\|rejected\|changes_requested`; nur `max`, sonst `LOCKED`; `text` nur bei `reply` mit `approved`), `POST /approvals/:id/withdraw` (nur der anfragende Akteur oder `max`, sonst `LOCKED`) |
+| `content [list] [--project] [--status] [--kind] [--category]\|show <id>\|add …\|update <id> …` | `GET /content?project=&status=&kind=&category=`, `GET /content/:id` (bei `live`: Zahlen seit `live_date` aus `search_daily` und `kpi_daily` `ga4:sessions` dims landing), `POST /content`, `PATCH /content/:id` |
+| `backlog [list] [--project] [--status] [--kind] [--category]\|add\|update <id> [--category] [--notion-url]` | `GET /backlog?project=&status=&kind=&category=`, `GET /backlog/:id` (ohne CLI-Befehl), `POST /backlog`, `PATCH /backlog/:id` |
+| `exp [list] [--category]\|show <id>\|add …\|update <id>\|eval [--project]` | `GET /experiments?project=&status=&category=`, `GET /experiments/:id` (mit Tagesreihe der Metrik und `changes` im Zeitraum), `POST /experiments`, `PATCH /experiments/:id`, `POST /experiments/evaluate {project?}` |
+| `changes [list] [--project] [--from] [--to] [--kind] [--category]\|add --project --kind --summary [--ref] [--exp] [--channel] [--date] [--category]` | `GET /changes?project=&from=&to=&kind=&experiment=&category=&limit=`, `POST /changes` |
 | `geo questions [--project] [--active\|--inactive\|--all]\|geo question add --project --text\|geo question update <id> [--text] [--active\|--inactive]` | `GET /geo/questions?project=&all=` (ohne `all` nur aktive), `POST /geo/questions`, `PATCH /geo/questions/:id` |
 | `geo record --file <json\|->` | `POST /geo/checks {checks:[…]}` (höchstens 1000; Upsert, aktualisiert `mention_targets`) |
 | `geo list --project [--date] [--engine]\|geo summary --project` | `GET /geo/checks?project=&date=&engine=&question=&limit=`, `GET /geo/summary?project=` (pro Lauf: Nennungsquote, Ø-Position, zitiert-Quote; Top-Konkurrenten; Quellen-Domains gruppiert) |
 | `geo run --project [--engine chatgpt-web] [--limit <n>]` | `POST /geo/run {project, engine?, limit?}` → Antwort wie `/collect`. Läuft `geo-chatgpt` auch, wenn ausgeschaltet; `engine` nur `chatgpt-web`; `limit` = nur die ersten N Fragen. CLI-Timeout 60 min, Exit 2 bei Fehler |
 | `mentions [list] [--project] [--status]\|update <id> [--status] [--contact] [--notes]` | `GET /mentions?project=&status=&kind=`, `PATCH /mentions/:id` |
-| `store [summary] --project [--days 28]\|store reviews --project [--store] [--limit 20]` | `GET /store/summary?project=&days=&end=` (Installs, Bewertung, Kampagnen aus `kpi_daily`), `GET /store/reviews?project=&store=&rating=&limit=` (API-Default 50) |
+| `store [summary] --project [--days 28]\|store reviews --project [--store] [--limit 20] [--needs-reply]` | `GET /store/summary?project=&days=&end=` (Installs, Bewertung, Kampagnen aus `kpi_daily`), `GET /store/reviews?project=&store=&rating=&needsReply=&limit=` (API-Default 50) |
+| `strategies [list] [--project] [--category] [--status]\|show <id>\|add --category --name [--project] [--id] …\|update <id> …` | `GET /strategies?project=&category=&status=`, `GET /strategies/:id`, `POST /strategies`, `PATCH /strategies/:id` (§7.10) |
+| `knowledge [list] [--project] [--category] [--type learning\|decision] [--status]\|update <type> <id> --category <c\|none>` | `GET /knowledge?project=&category=&type=&status=`, `PATCH /knowledge/:type/:id {category}` (§7.9) |
+| `app inbox --project [--type feature_request\|review] [--needs-reply] [--limit]` | `GET /app/inbox?project=&type=&needsReply=&limit=` (§7.8) |
+| `app publish [--project] [--dry-run]` | `POST /app/publish {project?, dryRun?}` (§7.8); CLI-Timeout 30 min, Exit 2 bei Fehlern |
 | `context --project <id> [--date]` | `GET /context?project=&date=` bzw. `GET /context/project?…` (§7.6) |
 | `import-growth --db <growth.db> --sites <sites.json> [--workspace-root <dir>]` | `POST /import/growth {db, sites, workspaceRoot?}` (§7.7) |
 
@@ -292,7 +308,9 @@ Override: Liste (oder `{stages:[…]}`) von `{key, label?, sources?, agg?}` mit 
 
 Externe Aktionen (`sitemap-submit`, `bing-submit`, `collectors setup app`) laufen ohne Transaktion und protokollieren jede externe Änderung danach als einen `changes`-Eintrag über `ChangesService`.
 
-Freigabe-Wirkung: `approvals add` mit `refType content` verknüpft das Content-Item mit der Freigabe, falls es noch keine hat. `decide` mit `approved` auf `ref_type=content` setzt ein Item im Status `idea` auf `approved` (andere Status bleiben Sache des Agents). Auf `ref_type=plan_entry` sperrt sie den Planeintrag (`locked=true`, Akteur `max`). Sonst ändert sich nur der Status der Freigabe. Die Antwort enthält `effects:[{entity,id,change}]`, jede Entscheidung schreibt `history`.
+Freigabe-Wirkung: `approvals add` mit `refType content` verknüpft das Content-Item mit der Freigabe, falls es noch keine hat. `decide` mit `approved` auf `ref_type=content` setzt ein Item im Status `idea` auf `approved` (andere Status bleiben Sache des Agents). Auf `ref_type=plan_entry` sperrt sie den Planeintrag (`locked=true`, Akteur `max`). Bei `kind task` legt sie die Aufgabe an (§7.8). Sonst ändert sich nur der Status der Freigabe. Die Antwort enthält `effects:[{entity,id,change}]`, jede Entscheidung schreibt `history`.
+
+Growth-Antworten von `approvals`, `backlog`, `experiments`, `changes`, `content` (Listen, Einzelzeilen, Schreibantworten, `context --project`) tragen `category` immer gefüllt (gespeichert oder abgeleitet). Shorts-Antworten bleiben ohne `category` (§0).
 
 Experiment-Auswertung (`evaluate`): fällig, wenn `start_date + eval_days <= gestern`. Baseline-Fenster `[start - baseline_days, start - 1]`, Nachher-Fenster `[start, start + eval_days - 1]`. Metrik `clicks|impressions|ctr|position` aus `search_daily` (gsc), gefiltert auf `page` = `target` (Pfad-Suffix-Vergleich), sonst `kpi_daily`. `result = {baseline, after, change}`; Urteil `inconclusive` bei weniger als 50 Impressionen in einem Fenster (nur Suchmetriken), sonst `win` bei ≥ +10 % (bei `position`: ≤ −10 %), `loss` umgekehrt, sonst `neutral`. Status → `evaluated`.
 
@@ -305,17 +323,64 @@ Ein Aufruf mit allem für einen Agentenlauf, nur lesend:
  kpiSummary (7 Tage vs. Vorwoche je Quelle/Metrik mit dims=''), search:{opportunities (Top 20)}, audit:{lastRun, openErrors},
  approvals:{pending, recentDecisions (14 Tage)}, content:{byStatus, items (nicht discarded)}, backlog:{open (impact desc, effort asc)},
  experiments:{running, recent}, changes (28 Tage), geo:{summary, questions}, mentions (status new|contacted), store,
- rules (brand-Scope), learnings (brand + global, aktiv), decisions (brand + global, 20),
- shorts:{accounts:[{id,name,status,activeFormat,horizon:{filledDays,days,firstGap}}]}, warnings:[…]}
+ rules (brand-Scope), learnings (brand + global + growth, aktiv, mit category), decisions (brand + global + growth, 20, mit category),
+ strategies:{web,app,general,shortform} (aktive Strategien je Kategorie, shortform = Formate des Projekts),
+ appInbox (counts wie GET /app/inbox), shorts:{accounts:[{id,name,status,activeFormat,horizon:{filledDays,days,firstGap}}]}, warnings:[…]}
 ```
 
-`warnings` beginnt mit den Ampel-Gründen und nennt fehlende Collectors, fehlende Funnel-Daten, fällige Experimente, offene Audit-Fehler und fehlende GEO-Fragen.
+`warnings` beginnt mit den Ampel-Gründen und nennt fehlende Collectors, fehlende Funnel-Daten, fällige Experimente, offene Audit-Fehler, fehlende GEO-Fragen und unbeantwortete Einträge der App-Inbox. Der Shorts-Kontext `context --account` bleibt unverändert.
 
 Weiche `GET /context`: Der Shorts-Controller ist zuerst registriert. Mit `account` liefert er `context --account` exakt wie bisher. Ohne `account`, aber mit `project`, reicht er die Anfrage an den Growth-Handler weiter. `GET /context/project?project=&date=` erreicht den Growth-Kontext direkt. Die CLI ruft `GET /context?project=` und weicht nur bei `NOT_FOUND` mit `Cannot GET …` (ältere API) auf `/context/project` aus.
 
 ### 7.7 `import-growth`
 
 Übernimmt das Website-Growth-System einmalig und idempotent: `sites.json` → `projects`, `channels`, `collectors`, `geo_questions`; `growth.db` → `collector_runs`, `kpi_daily`, `search_daily`, Audit-Tabellen, `geo_checks`, `changes`, `experiments`; mit `workspaceRoot` zusätzlich `<site>/backlog.md` und `<site>/posts/` → `backlog_items`/`content_items` und README → `learnings`. Quellen werden nur gelesen. Jede Zeile trägt einen deterministischen `source_key` (oder ihren natürlichen Schlüssel); bestehende Zeilen werden nie überschrieben, außer Messwerte in `kpi_daily`/`search_daily` (Upsert auf den Primärschlüssel). Ein Lauf ist eine Transaktion mit einem `history`-Eintrag. Antwort: `{source:{db,sites,workspaceRoot,rows}, imported, updated, unchanged, skipped, warnings, mapping}`. Die CLI macht Pfade absolut (`~` aufgelöst), weil die API relativ zu ihrem eigenen cwd auflösen würde.
+
+### 7.8 App-Inbox, Vorschläge und `app publish`
+
+**Inbox.** Der Collector `featurama` liest alle Requests eines Featurama-Projekts über die Featurama-CLI (`tool call listFeatureRequests`, `approval all`, Seiten zu 100 bis `totalCount`), dazu die Threads (`listFeatureRequestComments`) aller Requests mit Kommentaren. Zur Kontrolle liest er die Zählungen `needsReply + approved` und `approval pending` und legt Spiegel- und Featurama-Zahl in `stats` ab. `needs_reply` übernimmt den Wert von Featurama (kein Entwicklerkommentar oder Nutzerkommentar danach). Der Collector `reviews` liest Google Play über die Play Developer API (Text-Bewertungen der letzten 7 Tage) und die Bewertungs-CSVs aus dem Play-Bucket (`csvMonths`). Die CSVs übernehmen spätere Antworten nicht, deshalb bestätigt er jede CSV-Zeile ohne Antwort einzeln per API (höchstens 60 pro Lauf, schon beantwortete und seitdem unveränderte Bewertungen nicht). App Store über `asc reviews list --paginate --include-response`. `needs_reply`: Text-Bewertung ohne Antwort; bei Google auch, wenn die Bewertung nach der Antwort geändert wurde. `StoreService` führt Zeilen zusammen (leere Felder behalten den gespeicherten Wert, die neuere Antwort gewinnt) und berechnet `needs_reply` neu. CSV-Zeilen tragen die echte Review-ID aus `Review Link`; Zeilen mit der alten ID (Zeitpunkt + Gerät) werden beim nächsten Lauf umbenannt.
+
+`GET /app/inbox?project=&type=&needsReply=&limit=` (Default 200) → `{project, counts:{featureRequests:{total, needsReply, pending}, reviews:{total, needsReply, ratingsOnly, google_play, app_store}}, items:[…]}`. Items sortiert: braucht Antwort zuerst, dann letzte Aktivität. Jedes Item hat `type` (`feature_request|review`), `target` (`featurama|google_play|app_store`), `itemId`, `projectRef`, `lastSeen` (genau die Werte für eine `reply`-Payload), `needsReply`, `lastActivity`, `approvals:[{id, kind, status, title, published, publish}]` (verknüpfte `reply`/`task`-Vorschläge) und die Spalten der Quelle (`feature_requests` mit `comments` als Liste, `store_reviews`). Feature-Requests zählen als „braucht Antwort“ nur, wenn sie in Featurama freigegeben sind. Bewertungen ohne Text erscheinen nicht als Item (`ratingsOnly`).
+
+**Vorschläge.** `approvals add --kind reply|task` (Kategorie `app`, wenn nicht gesetzt). Prüfung beim Anlegen, unbekannte Payload-Felder → `INVALID`:
+
+- `reply`: `{target, itemId, text, language?, projectRef?, lastSeen?}`. Das Item muss im Spiegel stehen (`NOT_FOUND` mit Hinweis auf `collect --collector featurama|reviews`). `projectRef` (Featurama-Projekt, Play-Paket, App-ID) und `lastSeen` (`lastUserCommentAt` bzw. `last_modified`) kommen ohne Angabe aus dem Spiegel; ein abweichendes `projectRef` → `INVALID`. Textlänge: Google Play höchstens 350, App Store 5970, Featurama 10000 Zeichen, sonst `INVALID`. Pro Item eine offene Antwort (pending oder freigegeben und nicht veröffentlicht), sonst `CONFLICT`.
+- `task`: `{title?, detail?, kind (bug|feature|ux|store|other, Default other), impact (1–3, Default 2), effort (1–3, Default 2), sources:[{type, id}]}`; `title` fehlt → Titel der Freigabe.
+
+`decide --approve --text …` (nur `max`, nur `reply`): ersetzt `payload.text` und setzt `payload.editedBy`; der Originaltext steht in `history` (`before.payload`). Effekt `{entity:"approval", change:"Antworttext geändert"}`. Freigabe von `task` legt ein Aufgaben-Item an (`backlog_items`, `category app`, `source` „Freigabe <id>, <type> <id> …“, `source_key approval:<id>`), setzt `ref_type backlog`/`ref_id` an der Freigabe und meldet `{entity:"backlog", change:"Aufgabe angelegt"}`. Den Notion-Link trägt der Agent danach mit `backlog update <id> --notion-url …` ein.
+
+**`app publish`.** `POST /app/publish {project?, dryRun?}` bearbeitet freigegebene `reply`-Freigaben ohne `payload.published`, außer `stale`. Pro Freigabe, nacheinander, ohne Wiederholung im selben Lauf:
+
+1. Frisch lesen. Featurama: Thread des Requests. Google: Bewertung per ID. App Store: `asc reviews response for-review`.
+2. Gibt es schon eine Entwicklerantwort mit genau diesem Text → `already_published` (zählt als veröffentlicht, kein Posten).
+3. `stale`, wenn das Ziel beantwortet ist (Featurama: kein Bedarf mehr; Google: Antwort vorhanden und Bewertung danach nicht geändert; App Store: Antwort vorhanden) oder sich `lastSeen` geändert hat (Featurama: letzter Nutzerkommentar; Google: `lastModified`, sekundengenau). `payload.publish = {state:"stale", at, reason}`; der Agent legt bei Bedarf einen neuen Vorschlag an.
+4. Posten: Featurama `addFeatureRequestComment` (Entwicklerkommentar, öffentlich, löst ggf. eine E-Mail an den Einreicher aus), Google `POST …/reviews/{id}:reply` (ersetzt eine bestehende Antwort), App Store `asc reviews respond`. Zurücklesen (Google bis zu 8× im Abstand von 3 s).
+5. In einer kurzen Transaktion: `payload.published = {at, ref, verified}`, `changes`-Eintrag (`kind reply`, `category app`, `ref` Request-URL bzw. Review-/Antwort-ID), Spiegelzeile beantwortet (`needs_reply` 0).
+
+Fehler → `payload.publish = {state:"error", at, reason}`, der nächste Lauf versucht es wieder (und erkennt einen doch geposteten Text über Schritt 2). `dryRun` liest nur und schreibt nichts: Ergebnis `would_post|already_published|stale` mit `request` (Weg, Ziel, Textlänge) und `text`. Antwort `{dryRun, results:[{approvalId, project, target, itemId, state, reason?, ref?, verified?}], errors:[{approvalId, error}]}`. Läuft schon ein Publish, `CONFLICT`.
+
+### 7.9 Kategorien
+
+Gespeicherte Kategorie gewinnt; ohne gilt:
+
+| Tabelle | Ableitung |
+| --- | --- |
+| `learnings`, `decisions` | Scope `account\|format\|brand` → `shortform`, `growth` → `web`, `global` → `general` |
+| `experiments` | `target_type` `post` → `shortform`, `store` → `app`, sonst `web` |
+| `backlog_items` | `kind` `store\|bug\|feature\|ux` → `app`, sonst `web` |
+| `approvals` | `kind` `store_text\|reply\|task` → `app`; `hook\|format`, mit `account_id` oder `ref_type` `plan_entry\|hook\|format` → `shortform`; sonst `web` |
+| `changes` | `kind` `shorts` → `shortform`, `store\|reply` → `app`, sonst `web` |
+| `content_items` | `kind` `store_text` → `app`, sonst `web` |
+
+Filter `?category=web,app` (kommagetrennt) auf `/approvals`, `/backlog`, `/experiments`, `/changes`, `/content`, `/knowledge`, `/strategies`; unbekannte Werte → `INVALID`. Schreiben: `category` im Body von `POST`/`PATCH` dieser Routen, `null` (CLI `--category none`) löscht und leitet wieder ab.
+
+Learnings und Entscheidungen sind Shorts-Tabellen: `GET /learnings`, `/decisions`, `context --account`, `accounts show` geben `category` nicht aus. `POST /learnings` und `POST /decisions` nehmen `category` an (CLI `learning add|decision add --category`), die Antwort bleibt ohne. Die Growth-Sicht ist `GET /knowledge?project=&category=&type=&status=` → Liste `{type:"learning"|"decision", …Zeile, projectId (Projekt des Scopes, null bei global/growth), category}`, nach Datum absteigend. Mit `project`: Zeilen des Projekts (Brand, seine Accounts und Formate) plus `global` und `growth`. `status` (nur Learnings): Default `active`, `outdated`, `all`. `PATCH /knowledge/:type/:id {category}` setzt die Kategorie; Zeilen mit `actor max` ändert nur `max`.
+
+### 7.10 Strategien
+
+`GET /strategies?project=&category=&status=` → gespeicherte Strategien (`kind:"strategy"`, `skills` als Liste; mit `project` die des Projekts und die projektübergreifenden) und die Formate als Shortform-Strategien (`kind:"format"`, `category:"shortform"`, `projectId` = `formats.brand_id`, `summary` = Beschreibung der aktuellen Version, `skills`, `version`, `status:"active"`, `url:"/formats/<id>"`, `accounts:[{id, name, status, source:"account"|"plan", dates?}]`). `accounts` ermittelt die Strategien-Sicht selbst: `source account` = `accounts.default_format_id`, `source plan` = Planeinträge der nächsten 7 Tage mit diesem `format_id` (Liste `dates`). Formate erscheinen nur, wenn der Filter `shortform` (oder keine Kategorie) und `active` (oder keinen Status) zulässt. `GET /strategies/:id` liefert eine Strategie oder, bei einer Format-ID, das Format mit `guide`.
+
+`POST /strategies {id?, projectId?, category, name, summary?, guide?, status?, skills?, source?}` → 201; `id` Default Slug aus `name`; `category` nur `web|app|general` (`shortform` → `INVALID` mit Hinweis auf `formats add`); vergebene ID oder Format-ID → `CONFLICT`. `PATCH /strategies/:id` mit denselben Feldern (`projectId: null` = für alle Projekte); Strategien mit `actor max` ändert nur `max`; eine Format-ID → `INVALID` mit Hinweis auf `formats update`.
 
 ## 8. Web (`apps/web`)
 

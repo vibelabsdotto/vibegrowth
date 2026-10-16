@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common"
+import { AppInboxService } from "./app-inbox.service"
+import { AppPublishService } from "./app-publish.service"
 import { ApprovalsService } from "./approvals.service"
 import { BacklogService } from "./backlog.service"
 import { ChangesService } from "./changes.service"
@@ -6,19 +8,24 @@ import { ContentService } from "./content.service"
 import { DataBridge } from "./data-bridge"
 import { ExperimentsService } from "./experiments.service"
 import { GeoService } from "./geo.service"
+import { KnowledgeService } from "./knowledge.service"
 import { OverviewService } from "./overview.service"
 import { ProjectContextService } from "./project-context.service"
 import { StoreService } from "./store.service"
+import { StrategiesService } from "./strategies.service"
 import {
+  AppController,
   ApprovalsController,
   BacklogController,
   ChangesController,
   ContentController,
   ExperimentsController,
   GeoController,
+  KnowledgeController,
   MentionsController,
   OverviewController,
   StoreController,
+  StrategiesController,
 } from "./work.controllers"
 
 /**
@@ -36,6 +43,9 @@ import {
     GeoController,
     MentionsController,
     StoreController,
+    StrategiesController,
+    KnowledgeController,
+    AppController,
     OverviewController,
   ],
   providers: [
@@ -49,6 +59,10 @@ import {
     StoreService,
     OverviewService,
     ProjectContextService,
+    StrategiesService,
+    KnowledgeService,
+    AppInboxService,
+    AppPublishService,
   ],
   exports: [
     ApprovalsService,
@@ -60,6 +74,8 @@ import {
     StoreService,
     OverviewService,
     ProjectContextService,
+    StrategiesService,
+    AppInboxService,
   ],
 })
 export class GrowthWorkModule {}

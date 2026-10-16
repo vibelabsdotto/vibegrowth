@@ -61,7 +61,7 @@ export const PLAY_REPORTS = {
   installs_overview: "stats/installs/installs_{pkg}_{ym}_overview.csv",
   ratings_overview: "stats/ratings/ratings_{pkg}_{ym}_overview.csv",
 } as const
-const REVIEWS = "reviews/reviews_{pkg}_{ym}.csv"
+export const REVIEWS = "reviews/reviews_{pkg}_{ym}.csv"
 
 type Report = keyof typeof PLAY_REPORTS
 type CsvRow = Record<string, string>
@@ -205,7 +205,15 @@ export function playReportRows(report: Report, rows: CsvRow[], sum: KpiSum) {
   }
 }
 
-/** reviews_<pkg>_<ym>.csv → store reviews. The export has no review id: submit time + device are stable. */
+const millisIso = (v: string | undefined): string | null => {
+  const n = num(v)
+  return n === null || n <= 0 ? null : new Date(n).toISOString()
+}
+
+/**
+ * reviews_<pkg>_<ym>.csv → store reviews. The review id comes from `Review Link` (?reviewId=…),
+ * the same id the Play API uses. `legacyId` (submit millis + device) is the id rows had before.
+ */
 export function playReviewRows(rows: CsvRow[]): StoreReviewRow[] {
   const out: StoreReviewRow[] = []
   for (const r of rows) {
@@ -213,16 +221,34 @@ export function playReviewRows(rows: CsvRow[]): StoreReviewRow[] {
     const submitted = col(r, "Review Submit Date and Time")?.trim()
     if (!millis && !submitted) continue
     const text = (v: string | undefined) => (v?.trim() ? v.trim() : null)
+    const legacyId = `${millis || submitted}:${col(r, "Device")?.trim() ?? ""}`
+    const link = col(r, "Review Link")?.trim() ?? ""
+    const realId = /[?&]reviewId=([^&#]+)/.exec(link)?.[1]
+    const reply = text(col(r, "Developer Reply Text"))
+    const title = text(col(r, "Review Title"))
+    const body = text(col(r, "Review Text"))
+    const lastModified =
+      millisIso(col(r, "Review Last Update Millis Since Epoch")) ??
+      millisIso(millis)
+    const replyAt = reply
+      ? millisIso(col(r, "Developer Reply Millis Since Epoch"))
+      : null
     out.push({
       store: "google_play",
-      reviewId: `${millis || submitted}:${col(r, "Device")?.trim() ?? ""}`,
+      reviewId: realId ? decodeURIComponent(realId) : legacyId,
+      legacyId: realId ? legacyId : null,
       date: submitted || null,
       rating: num(col(r, "Star Rating")),
-      title: text(col(r, "Review Title")),
-      body: text(col(r, "Review Text")),
+      title,
+      body,
       language: text(col(r, "Reviewer Language")),
       version: text(col(r, "App Version Name")),
-      reply: text(col(r, "Developer Reply Text")),
+      reply,
+      lastModified,
+      replyAt,
+      needsReply:
+        Boolean(title || body) &&
+        (!reply || Boolean(lastModified && replyAt && lastModified > replyAt)),
     })
   }
   return out

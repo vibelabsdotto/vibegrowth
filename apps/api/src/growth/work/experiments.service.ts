@@ -10,6 +10,11 @@ import {
   or,
   type SQL,
 } from "drizzle-orm"
+import {
+  categoryFilter,
+  categoryInput,
+  experimentCategory,
+} from "../../core/category"
 import type { Ctx } from "../../core/db"
 import { changes, experiments, kpiDaily, searchDaily } from "../../core/schema"
 import {
@@ -102,6 +107,7 @@ export interface ExperimentInput {
   baselineDays?: number
   evalDays?: number
   sourceKey?: string | null
+  category?: string | null
 }
 
 export interface ExperimentPatch {
@@ -116,6 +122,7 @@ export interface ExperimentPatch {
   evalDays?: number
   status?: string
   verdict?: string | null
+  category?: string | null
 }
 
 export interface WindowResult {
@@ -379,6 +386,7 @@ export function verdictFor(
 export function experimentOut(e: ExperimentRow) {
   return {
     ...e,
+    category: experimentCategory(e),
     result: parseJson<ExperimentResult | null>(e.result, null),
     windows: windows(e),
     dueOn: dueOn(e),
@@ -393,18 +401,20 @@ export class ExperimentsService {
     return this.database.ctx
   }
 
-  list(f: { project?: string; status?: string }) {
+  list(f: { project?: string; status?: string; category?: string }) {
     const conds: SQL[] = []
     if (f.project) conds.push(eq(experiments.projectId, f.project))
     const statuses = listOf(f.status, EXPERIMENT_STATUS, "status")
     if (statuses) conds.push(inArray(experiments.status, statuses))
-    return this.ctx.db
+    const rows = this.ctx.db
       .select()
       .from(experiments)
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(experiments.startDate), desc(experiments.id))
       .all()
       .map(experimentOut)
+    const cats = categoryFilter(f.category)
+    return cats ? rows.filter((e) => cats.has(e.category)) : rows
   }
 
   get(id: number) {
@@ -486,6 +496,7 @@ export class ExperimentsService {
           status: "running",
           actor,
           sourceKey: input.sourceKey ?? null,
+          category: categoryInput(input.category) ?? null,
         })
         .returning()
         .get()
@@ -531,6 +542,7 @@ export class ExperimentsService {
         patch.status = oneOf(p.status, EXPERIMENT_STATUS, "status")
       if (p.verdict !== undefined)
         patch.verdict = optOneOf(p.verdict, VERDICTS, "verdict") ?? null
+      if (p.category !== undefined) patch.category = categoryInput(p.category)
       return experimentOut(
         patchRow(ctx, experiments, "experiment", id, patch, actor)
       )

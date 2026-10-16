@@ -293,6 +293,8 @@ export const learnings = sqliteTable("learnings", {
   source: text("source"),
   /** active | outdated */
   status: text("status").notNull().default("active"),
+  /** web | shortform | app | general; null = derived (growth/work/category.ts) */
+  category: text("category"),
   sourceKey: text("source_key").unique(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -310,6 +312,8 @@ export const decisions = sqliteTable("decisions", {
   scopeId: text("scope_id"),
   supersedesId: integer("supersedes_id"),
   source: text("source"),
+  /** web | shortform | app | general; null = derived (growth/work/category.ts) */
+  category: text("category"),
   sourceKey: text("source_key").unique(),
   createdAt: createdAt(),
 })
@@ -548,6 +552,8 @@ export const experiments = sqliteTable(
     result: text("result"),
     /** win | loss | neutral | inconclusive */
     verdict: text("verdict"),
+    /** web | shortform | app | general; null = derived (growth/work/category.ts) */
+    category: text("category"),
     actor: text("actor").notNull(),
     sourceKey: text("source_key").unique(),
     createdAt: createdAt(),
@@ -571,6 +577,8 @@ export const changes = sqliteTable(
     summary: text("summary").notNull(),
     ref: text("ref"),
     experimentId: integer("experiment_id").references(() => experiments.id),
+    /** web | shortform | app | general; null = derived (growth/work/category.ts) */
+    category: text("category"),
     actor: text("actor").notNull(),
     sourceKey: text("source_key").unique(),
     createdAt: createdAt(),
@@ -604,6 +612,8 @@ export const approvals = sqliteTable(
     decidedBy: text("decided_by"),
     decidedAt: text("decided_at"),
     decisionNote: text("decision_note"),
+    /** web | shortform | app | general; null = derived (growth/work/category.ts) */
+    category: text("category"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -635,6 +645,8 @@ export const contentItems = sqliteTable(
     liveDate: text("live_date"),
     approvalId: integer("approval_id").references(() => approvals.id),
     notes: text("notes"),
+    /** web | shortform | app | general; null = derived (growth/work/category.ts) */
+    category: text("category"),
     position: integer("position").notNull().default(0),
     actor: text("actor").notNull(),
     sourceKey: text("source_key").unique(),
@@ -661,6 +673,10 @@ export const backlogItems = sqliteTable(
     status: text("status").notNull().default("open"),
     source: text("source"),
     doneRef: text("done_ref"),
+    /** web | shortform | app | general; null = derived (growth/work/category.ts) */
+    category: text("category"),
+    /** Notion ticket of an app task (bug/feature), set by the agent that created it */
+    notionUrl: text("notion_url"),
     position: integer("position").notNull().default(0),
     actor: text("actor").notNull(),
     sourceKey: text("source_key").unique(),
@@ -771,6 +787,16 @@ export const storeReviews = sqliteTable(
     language: text("language"),
     version: text("version"),
     reply: text("reply"),
+    /** Last change of the user review (Google lastModified, Apple createdDate) */
+    lastModified: text("last_modified"),
+    /** Last change of the developer reply */
+    replyAt: text("reply_at"),
+    /** Apple response state (PUBLISHED, PENDING_PUBLISH), null for Google */
+    replyState: text("reply_state"),
+    /** Text review without reply, or changed after the reply */
+    needsReply: integer("needs_reply", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -781,5 +807,72 @@ export const storeReviews = sqliteTable(
       t.reviewId
     ),
     index("store_reviews_project_date").on(t.projectId, t.date),
+  ]
+)
+
+/** Growth strategies per project and category. Shortform strategies are the formats (read view). */
+export const strategies = sqliteTable(
+  "strategies",
+  {
+    /** slug */
+    id: text("id").primaryKey(),
+    /** null = for every project */
+    projectId: text("project_id").references(() => projects.id),
+    /** web | app | general */
+    category: text("category").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary"),
+    /** Markdown: approach, signals, acceptance */
+    guide: text("guide"),
+    /** active | paused | retired */
+    status: text("status").notNull().default("active"),
+    /** JSON array of skills an agent loads for this strategy */
+    skills: text("skills").notNull().default("[]"),
+    source: text("source"),
+    actor: text("actor").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("strategies_project_category").on(t.projectId, t.category)]
+)
+
+/** Mirror of Featurama feature requests (collector featurama, read only). No e-mail addresses. */
+export const featureRequests = sqliteTable(
+  "feature_requests",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectId: projectId(),
+    featuramaProjectId: text("featurama_project_id").notNull(),
+    requestId: text("request_id").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    /** Featurama status: Requested | Roadmap | InProgress | Done | Declined */
+    status: text("status"),
+    votes: integer("votes").notNull().default(0),
+    /** Approved in the Featurama inbox (public) */
+    approved: integer("approved", { mode: "boolean" }).notNull().default(false),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    /** Featurama createdAt of the request */
+    requestedAt: text("requested_at"),
+    lastUserCommentAt: text("last_user_comment_at"),
+    lastDeveloperCommentAt: text("last_developer_comment_at"),
+    /** Featurama needsReply: no developer comment, or a user comment after the last one */
+    needsReply: integer("needs_reply", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    commentCount: integer("comment_count").notNull().default(0),
+    /** JSON [{id, role, author (developers only), content, createdAt}] */
+    comments: text("comments").notNull().default("[]"),
+    url: text("url"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("feature_requests_project_request").on(
+      t.projectId,
+      t.requestId
+    ),
+    index("feature_requests_project_needs_reply").on(t.projectId, t.needsReply),
   ]
 )

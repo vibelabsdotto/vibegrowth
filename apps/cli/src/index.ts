@@ -915,12 +915,21 @@ projectAlias(
   learningCmd.command("add").option("--account <id>").option("--brand <id>")
 )
   .option("--format <id>")
-  .option("--growth", "gilt für die Growth-Arbeit aller Projekte (nicht für Shorts)")
+  .option(
+    "--growth",
+    "gilt für die Growth-Arbeit aller Projekte (nicht für Shorts)"
+  )
   .requiredOption("--statement <text>")
   .requiredOption("--evidence <text>", "Beleg: Posts und Zahlen")
   .option("--posts <ids>", "Post-IDs als Beleg, kommagetrennt")
   .option("--date <date>")
   .option("--source <text>")
+  .addOption(
+    new Option(
+      "--category <category>",
+      "Growth-Kategorie (Standard: aus dem Geltungsbereich abgeleitet)"
+    ).choices(["web", "shortform", "app", "general"])
+  )
   .action(
     run(
       (o: {
@@ -932,6 +941,7 @@ projectAlias(
         posts?: string
         date?: string
         source?: string
+        category?: string
       }) =>
         api.post("/learnings", {
           ...scopeFrom(o),
@@ -940,6 +950,7 @@ projectAlias(
           evidencePostIds: list(o.posts)?.map(int),
           date: o.date,
           source: o.source,
+          category: o.category,
         })
     )
   )
@@ -969,10 +980,19 @@ projectAlias(
     .option("--brand <id>")
 )
   .option("--format <id>")
-  .option("--growth", "gilt für die Growth-Arbeit aller Projekte (nicht für Shorts)")
+  .option(
+    "--growth",
+    "gilt für die Growth-Arbeit aller Projekte (nicht für Shorts)"
+  )
   .option("--date <date>")
   .option("--supersedes <id>", "ersetzt Entscheidung", int)
   .option("--source <text>")
+  .addOption(
+    new Option(
+      "--category <category>",
+      "Growth-Kategorie (Standard: aus dem Geltungsbereich abgeleitet)"
+    ).choices(["web", "shortform", "app", "general"])
+  )
   .action(
     run(
       (o: {
@@ -985,8 +1005,10 @@ projectAlias(
         date?: string
         supersedes?: number
         source?: string
+        category?: string
       }) =>
         api.post("/decisions", {
+          category: o.category,
           ...scopeFrom(o),
           title: o.title,
           rationale: o.rationale,

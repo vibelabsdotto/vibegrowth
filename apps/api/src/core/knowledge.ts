@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, or } from "drizzle-orm"
 import type { Ctx } from "./db"
 import { getFormat, oneOf } from "./catalog"
+import { categoryInput } from "./category"
 import {
   accounts,
   brands,
@@ -31,6 +32,23 @@ export const LEARNING_SCOPES = [
   "global",
   "growth",
 ] as const
+/**
+ * Shorts responses keep the JSON of commit 702c6c5: the growth column `category` never shows up
+ * there. The growth knowledge view (GET /knowledge) reads it.
+ */
+export function shortsRow<T extends { category?: string | null }>(
+  row: T
+): Omit<T, "category"> {
+  const { category: _category, ...rest } = row
+  void _category
+  return rest
+}
+
+/** History payload of a new learning/decision: category only when set. */
+function createdRow<T extends { category?: string | null }>(row: T) {
+  return row.category ? row : shortsRow(row)
+}
+
 export const INSPO_TYPES = [
   "format",
   "hook",
@@ -162,7 +180,7 @@ export function listLearnings(
     .orderBy(desc(learnings.date), desc(learnings.id))
     .all()
     .map((l) => ({
-      ...l,
+      ...shortsRow(l),
       evidencePostIds: parseJson<number[]>(l.evidencePostIds, []),
     }))
 }
@@ -178,10 +196,13 @@ export function addLearning(
     date?: string
     source?: string | null
     sourceKey?: string
+    /** growth category (web|shortform|app|general); not part of the shorts response */
+    category?: string | null
   },
   actor: string
 ) {
   const scopeId = checkScope(ctx, input.scopeType, input.scopeId)
+  const category = categoryInput(input.category) ?? null
   if (!input.statement?.trim())
     throw new VSError("INVALID", "Learning braucht eine Aussage")
   if (!input.evidence?.trim())
@@ -210,6 +231,7 @@ export function addLearning(
       actor,
       source: input.source ?? null,
       sourceKey: input.sourceKey ?? null,
+      category,
     })
     .returning()
     .get()
@@ -218,9 +240,9 @@ export function addLearning(
     entity: "learning",
     entityId: row.id,
     action: "create",
-    after: row,
+    after: createdRow(row),
   })
-  return row
+  return shortsRow(row)
 }
 
 export function setLearningStatus(
@@ -230,14 +252,16 @@ export function setLearningStatus(
   actor: string
 ) {
   oneOf(status, ["active", "outdated"] as const, "status")
-  return patchRow(
-    ctx,
-    learnings,
-    "learning",
-    id,
-    { status },
-    actor,
-    status === "outdated" ? "outdate" : "reactivate"
+  return shortsRow(
+    patchRow(
+      ctx,
+      learnings,
+      "learning",
+      id,
+      { status },
+      actor,
+      status === "outdated" ? "outdate" : "reactivate"
+    )
   )
 }
 
@@ -265,6 +289,7 @@ export function listDecisions(
     .where(where)
     .orderBy(desc(decisions.date), desc(decisions.id))
     .all()
+    .map(shortsRow)
 }
 
 export function addDecision(
@@ -279,10 +304,13 @@ export function addDecision(
     supersedesId?: number | null
     source?: string | null
     sourceKey?: string
+    /** growth category (web|shortform|app|general); not part of the shorts response */
+    category?: string | null
   },
   actor: string
 ) {
   const scopeId = checkScope(ctx, input.scopeType, input.scopeId)
+  const category = categoryInput(input.category) ?? null
   oneOf(input.kind ?? "decision", ["decision", "pivot"] as const, "kind")
   if (!input.title?.trim())
     throw new VSError("INVALID", "Entscheidung braucht einen Titel")
@@ -306,6 +334,7 @@ export function addDecision(
       supersedesId: input.supersedesId ?? null,
       source: input.source ?? null,
       sourceKey: input.sourceKey ?? null,
+      category,
     })
     .returning()
     .get()
@@ -314,9 +343,9 @@ export function addDecision(
     entity: "decision",
     entityId: row.id,
     action: "create",
-    after: row,
+    after: createdRow(row),
   })
-  return row
+  return shortsRow(row)
 }
 
 // ---------- hooks ----------

@@ -33,11 +33,14 @@ export class ApprovalCreateDto {
   @ValidateIf((_, v) => typeof v !== "number")
   @IsString()
   refId?: string | number | null
+  @IsOptional() @IsString() category?: string | null
 }
 
 export class ApprovalDecideDto {
   @IsString() @IsNotEmpty() decision!: string
   @IsOptional() @IsString() note?: string | null
+  /** Changed reply text (kind reply, with approve) */
+  @IsOptional() @IsString() text?: string | null
 }
 
 // ---------- content ----------
@@ -56,6 +59,7 @@ export class ContentPatchDto {
   @IsOptional() @IsInt() approvalId?: number | null
   @IsOptional() @IsString() notes?: string | null
   @IsOptional() @IsInt() position?: number
+  @IsOptional() @IsString() category?: string | null
 }
 
 export class ContentCreateDto extends ContentPatchDto {
@@ -75,6 +79,8 @@ export class BacklogPatchDto {
   @IsOptional() @IsString() source?: string | null
   @IsOptional() @IsString() doneRef?: string | null
   @IsOptional() @IsInt() position?: number
+  @IsOptional() @IsString() category?: string | null
+  @IsOptional() @IsString() notionUrl?: string | null
 }
 
 export class BacklogCreateDto extends BacklogPatchDto {
@@ -96,6 +102,7 @@ export class ExperimentPatchDto {
   @IsOptional() @IsInt() evalDays?: number
   @IsOptional() @IsString() status?: string
   @IsOptional() @IsString() verdict?: string | null
+  @IsOptional() @IsString() category?: string | null
 }
 
 export class ExperimentCreateDto {
@@ -110,6 +117,7 @@ export class ExperimentCreateDto {
   @IsOptional() @IsInt() baselineDays?: number
   @IsOptional() @IsInt() evalDays?: number
   @IsOptional() @IsString() sourceKey?: string | null
+  @IsOptional() @IsString() category?: string | null
 }
 
 export class EvaluateDto {
@@ -125,6 +133,45 @@ export class ChangeCreateDto {
   @IsOptional() @IsString() ref?: string | null
   @IsOptional() @IsInt() experimentId?: number | null
   @IsOptional() @IsString() sourceKey?: string | null
+  @IsOptional() @IsString() category?: string | null
+}
+
+// ---------- strategies & knowledge ----------
+
+export class StrategyPatchDto {
+  @IsOptional() @IsString() projectId?: string | null
+  @IsOptional() @IsString() category?: string
+  @IsOptional() @IsString() name?: string
+  @IsOptional() @IsString() summary?: string | null
+  @IsOptional() @IsString() guide?: string | null
+  @IsOptional() @IsString() status?: string
+  @IsOptional() @IsArray() @IsString({ each: true }) skills?: string[]
+  @IsOptional() @IsString() source?: string | null
+}
+
+export class StrategyCreateDto {
+  @IsOptional() @IsString() id?: string
+  @IsOptional() @IsString() projectId?: string | null
+  @IsString() @IsNotEmpty() category!: string
+  @IsString() @IsNotEmpty() name!: string
+  @IsOptional() @IsString() summary?: string | null
+  @IsOptional() @IsString() guide?: string | null
+  @IsOptional() @IsString() status?: string
+  @IsOptional() @IsArray() @IsString({ each: true }) skills?: string[]
+  @IsOptional() @IsString() source?: string | null
+}
+
+export class KnowledgePatchDto {
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  category!: string | null
+}
+
+// ---------- app ----------
+
+export class AppPublishDto {
+  @IsOptional() @IsString() project?: string
+  @IsOptional() @IsBoolean() dryRun?: boolean
 }
 
 // ---------- geo & mentions ----------

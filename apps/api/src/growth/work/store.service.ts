@@ -6,6 +6,7 @@ import {
   assertDate,
   nowIso,
   parseJson,
+  patchRow,
   recordHistory,
   VGError,
 } from "../../core/util"
@@ -35,6 +36,26 @@ const STORE_SOURCES = {
   },
 } as const
 
+/** Text review without reply; Google also when the review changed after the reply. */
+export function reviewNeedsReply(r: {
+  store: string
+  title?: string | null
+  body?: string | null
+  reply?: string | null
+  replyState?: string | null
+  replyAt?: string | null
+  lastModified?: string | null
+}) {
+  if (!r.title && !r.body) return false
+  if (!r.reply && !r.replyState) return true
+  return Boolean(
+    r.store === "google_play" &&
+    r.lastModified &&
+    r.replyAt &&
+    r.lastModified > r.replyAt
+  )
+}
+
 export interface ReviewInput {
   projectId: string
   store: string
@@ -46,6 +67,11 @@ export interface ReviewInput {
   language?: string | null
   version?: string | null
   reply?: string | null
+  lastModified?: string | null
+  replyAt?: string | null
+  replyState?: string | null
+  needsReply?: boolean
+  legacyId?: string | null
 }
 
 @Injectable()
@@ -198,9 +224,12 @@ export class StoreService {
     store?: string
     rating?: number
     limit?: number
+    needsReply?: boolean
   }) {
     const project = requireProject(this.ctx, f.project)
     const conds: SQL[] = [eq(storeReviews.projectId, project.id)]
+    if (f.needsReply !== undefined)
+      conds.push(eq(storeReviews.needsReply, f.needsReply))
     const store = optOneOf(f.store, STORES, "store")
     if (store) conds.push(eq(storeReviews.store, store))
     if (f.rating !== undefined) conds.push(eq(storeReviews.rating, f.rating))
@@ -213,41 +242,84 @@ export class StoreService {
       .all()
   }
 
-  /** Upsert reviews by (project, store, review_id). For the play/asc collectors; one history entry per call. */
+  /**
+   * Upsert reviews by (project, store, review_id); one history entry per project and call. Merges
+   * instead of overwriting: empty fields keep the stored value, the newer reply wins, and
+   * needs_reply is recomputed from the merged row. A row with `legacyId` takes over the stored
+   * row with that id (play CSV rows before the real review id was read).
+   */
   upsertReviews(rows: ReviewInput[], actor: string) {
     const ctx = this.ctx
     return this.database.tx(() => {
       let inserted = 0
       let updated = 0
+      let renamed = 0
+      let merged = 0
       const projectsSeen = new Set<string>()
+      const find = (projectId: string, store: string, reviewId: string) =>
+        ctx.db
+          .select()
+          .from(storeReviews)
+          .where(
+            and(
+              eq(storeReviews.projectId, projectId),
+              eq(storeReviews.store, store),
+              eq(storeReviews.reviewId, reviewId)
+            )
+          )
+          .get()
       for (const r of rows) {
         const project = requireProject(ctx, r.projectId)
         const store = oneOf(r.store, STORES, "store")
         if (!r.reviewId) throw new VGError("INVALID", "reviewId fehlt")
-        const values = {
-          date: r.date ?? null,
-          rating: r.rating ?? null,
-          title: r.title ?? null,
-          body: r.body ?? null,
-          language: r.language ?? null,
-          version: r.version ?? null,
-          reply: r.reply ?? null,
+        let existing = find(project.id, store, r.reviewId)
+        const legacy =
+          r.legacyId && r.legacyId !== r.reviewId
+            ? find(project.id, store, r.legacyId)
+            : undefined
+        if (legacy && !existing) {
+          ctx.db
+            .update(storeReviews)
+            .set({ reviewId: r.reviewId, updatedAt: nowIso() })
+            .where(eq(storeReviews.id, legacy.id))
+            .run()
+          existing = { ...legacy, reviewId: r.reviewId }
+          renamed++
+        } else if (legacy && existing && legacy.id !== existing.id) {
+          ctx.db
+            .delete(storeReviews)
+            .where(eq(storeReviews.id, legacy.id))
+            .run()
+          merged++
         }
-        const existing = ctx.db
-          .select({ id: storeReviews.id })
-          .from(storeReviews)
-          .where(
-            and(
-              eq(storeReviews.projectId, project.id),
-              eq(storeReviews.store, store),
-              eq(storeReviews.reviewId, r.reviewId)
-            )
-          )
-          .get()
+        const keep = <T>(v: T | null | undefined, old: T | null | undefined) =>
+          v === undefined || v === null ? (old ?? null) : v
+        const later = (a?: string | null, b?: string | null) =>
+          !a ? (b ?? null) : !b ? a : a > b ? a : b
+        const newerReply =
+          Boolean(r.reply) &&
+          (!existing?.replyAt || !r.replyAt || r.replyAt >= existing.replyAt)
+        const values = {
+          date: keep(r.date, existing?.date) ?? r.lastModified ?? null,
+          rating: keep(r.rating, existing?.rating),
+          title: keep(r.title, existing?.title),
+          body: keep(r.body, existing?.body),
+          language: keep(r.language, existing?.language),
+          version: keep(r.version, existing?.version),
+          reply: newerReply ? r.reply! : (existing?.reply ?? r.reply ?? null),
+          replyAt: newerReply
+            ? (r.replyAt ?? existing?.replyAt ?? null)
+            : (existing?.replyAt ?? null),
+          replyState: newerReply
+            ? (r.replyState ?? null)
+            : keep(existing?.replyState, r.replyState),
+          lastModified: later(r.lastModified, existing?.lastModified),
+        }
+        const needsReply = reviewNeedsReply({ store, ...values })
         if (existing) {
           ctx.db
             .update(storeReviews)
-            .set({ ...values, updatedAt: nowIso() })
+            .set({ ...values, needsReply, updatedAt: nowIso() })
             .where(eq(storeReviews.id, existing.id))
             .run()
           updated++
@@ -259,6 +331,7 @@ export class StoreService {
               store,
               reviewId: r.reviewId,
               ...values,
+              needsReply,
             })
             .run()
           inserted++
@@ -275,9 +348,48 @@ export class StoreService {
             rows: rows.filter((r) => r.projectId === p).length,
             inserted,
             updated,
+            ...(renamed ? { renamed } : {}),
+            ...(merged ? { merged } : {}),
           },
         })
-      return { inserted, updated }
+      return { inserted, updated, renamed, merged }
     })
+  }
+
+  /** After `app publish`: the reply is on the review (inside the caller's transaction). */
+  markReplied(
+    projectId: string,
+    store: string,
+    reviewId: string,
+    reply: { text: string; at: string; state?: string | null },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    const row = ctx.db
+      .select()
+      .from(storeReviews)
+      .where(
+        and(
+          eq(storeReviews.projectId, projectId),
+          eq(storeReviews.store, store),
+          eq(storeReviews.reviewId, reviewId)
+        )
+      )
+      .get()
+    if (!row) return null
+    return patchRow(
+      ctx,
+      storeReviews,
+      "store_review",
+      row.id,
+      {
+        reply: reply.text,
+        replyAt: reply.at,
+        replyState: reply.state ?? null,
+        needsReply: false,
+      },
+      actor,
+      "reply"
+    )
   }
 }

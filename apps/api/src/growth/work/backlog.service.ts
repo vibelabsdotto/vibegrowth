@@ -1,5 +1,11 @@
 import { Injectable } from "@nestjs/common"
 import { and, eq, inArray, type SQL } from "drizzle-orm"
+import {
+  backlogCategory,
+  categoryFilter,
+  categoryInput,
+  withCategory,
+} from "../../core/category"
 import { backlogItems } from "../../core/schema"
 import { getById, patchRow, recordHistory, VGError } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
@@ -11,6 +17,9 @@ export const BACKLOG_KINDS = [
   "content",
   "store",
   "growth",
+  "bug",
+  "feature",
+  "ux",
   "other",
 ] as const
 export const BACKLOG_STATUS = ["open", "doing", "done", "dropped"] as const
@@ -29,6 +38,8 @@ export interface BacklogInput {
   doneRef?: string | null
   position?: number
   sourceKey?: string | null
+  category?: string | null
+  notionUrl?: string | null
 }
 
 export type BacklogPatch = Partial<
@@ -56,6 +67,11 @@ export function backlogOrder(a: BacklogRow, b: BacklogRow) {
   )
 }
 
+/** Row with its effective category (stored or derived). */
+export function backlogOut(r: BacklogRow) {
+  return { ...r, category: backlogCategory(r) }
+}
+
 @Injectable()
 export class BacklogService {
   constructor(private readonly database: DatabaseService) {}
@@ -64,14 +80,19 @@ export class BacklogService {
     return this.database.ctx
   }
 
-  list(f: { project?: string; status?: string; kind?: string }) {
+  list(f: {
+    project?: string
+    status?: string
+    kind?: string
+    category?: string
+  }) {
     const conds: SQL[] = []
     if (f.project) conds.push(eq(backlogItems.projectId, f.project))
     const statuses = listOf(f.status, BACKLOG_STATUS, "status")
     if (statuses) conds.push(inArray(backlogItems.status, statuses))
     const kinds = listOf(f.kind, BACKLOG_KINDS, "kind")
     if (kinds) conds.push(inArray(backlogItems.kind, kinds))
-    return this.ctx.db
+    const rows = this.ctx.db
       .select()
       .from(backlogItems)
       .where(conds.length ? and(...conds) : undefined)
@@ -79,10 +100,11 @@ export class BacklogService {
       .sort(
         (a, b) => a.projectId.localeCompare(b.projectId) || backlogOrder(a, b)
       )
+    return withCategory(rows, backlogCategory, categoryFilter(f.category))
   }
 
   get(id: number) {
-    return getById(this.ctx, backlogItems, id, "Backlog-Eintrag")
+    return backlogOut(getById(this.ctx, backlogItems, id, "Backlog-Eintrag"))
   }
 
   add(input: BacklogInput, actor: string) {
@@ -106,6 +128,8 @@ export class BacklogService {
           position: input.position ?? 0,
           actor,
           sourceKey: input.sourceKey ?? null,
+          category: categoryInput(input.category) ?? null,
+          notionUrl: input.notionUrl ?? null,
         })
         .returning()
         .get()
@@ -116,7 +140,7 @@ export class BacklogService {
         action: "create",
         after: row,
       })
-      return row
+      return backlogOut(row)
     })
   }
 
@@ -136,10 +160,13 @@ export class BacklogService {
         patch.status = oneOf(p.status, BACKLOG_STATUS, "status")
       if (p.impact !== undefined) patch.impact = scale(p.impact, "impact")
       if (p.effort !== undefined) patch.effort = scale(p.effort, "effort")
-      for (const k of ["detail", "source", "doneRef"] as const)
+      for (const k of ["detail", "source", "doneRef", "notionUrl"] as const)
         if (p[k] !== undefined) patch[k] = p[k]
       if (p.position !== undefined) patch.position = p.position
-      return patchRow(ctx, backlogItems, "backlog", id, patch, actor)
+      if (p.category !== undefined) patch.category = categoryInput(p.category)
+      return backlogOut(
+        patchRow(ctx, backlogItems, "backlog", id, patch, actor)
+      )
     })
   }
 }
