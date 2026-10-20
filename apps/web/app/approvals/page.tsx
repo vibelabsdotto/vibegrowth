@@ -13,11 +13,13 @@ import { ScopeLabel, ScopeLink } from "@/components/growth/scope"
 import { SectionError } from "@/components/growth/status"
 import { UrlFilter } from "@/components/growth/url-filter"
 import { PageHeader } from "@/components/page-header"
+import { TestingTasks } from "@/components/growth/testing-tasks"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { parseCategory } from "@/lib/categories"
 import type {
   AppInbox,
   Approval,
+  BacklogItem,
   ContentItem,
   InboxFeatureRequest,
   InboxItem,
@@ -31,7 +33,12 @@ export const metadata = { title: "Wartet auf Max" }
 
 const DECIDED = "approved,rejected,changes_requested,withdrawn"
 
-type Search = { kind?: string; category?: string; item?: string }
+type Search = {
+  kind?: string
+  category?: string
+  item?: string
+  task?: string
+}
 
 export default async function ApprovalsPage({
   searchParams,
@@ -49,7 +56,9 @@ export default async function ApprovalsPage({
   }
   const itemId = Number(sp.item)
   const showInbox = !sp.kind && (!category || category === "app")
-  const [res, decidedRes, pendingRes, openRes] = await Promise.all([
+  const taskId = Number(sp.task)
+  const showTasks = !sp.kind
+  const [res, decidedRes, pendingRes, openRes, testingRes] = await Promise.all([
     load<Approval[]>("/approvals", { ...filter, status: "pending" }),
     load<Approval[]>("/approvals", { ...filter, status: DECIDED, limit: 15 }),
     // The note below says what the project filter hides.
@@ -62,7 +71,38 @@ export default async function ApprovalsPage({
           limit: 500,
         })
       : null,
+    // Tasks an agent delivered: Max says "Passt" or "Klappt nicht".
+    showTasks
+      ? load<BacklogItem[]>("/backlog", {
+          project: project || undefined,
+          category: category || undefined,
+          status: "testing",
+        })
+      : null,
   ])
+  const testing = testingRes?.data ?? []
+  const linkedTask =
+    Number.isInteger(taskId) &&
+    taskId > 0 &&
+    !testing.some((t) => t.id === taskId)
+      ? (await load<BacklogItem>(`/backlog/${taskId}`)).data
+      : null
+  const shownTasks = linkedTask ? [...testing, linkedTask] : testing
+  const taskSources: Record<string, InboxItem> = {}
+  if (shownTasks.some((t) => t.sources?.length)) {
+    const inbox = await load<AppInbox>("/app/inbox", {
+      project: project || undefined,
+      limit: 5000,
+    })
+    const want = new Set(
+      shownTasks.flatMap((t) =>
+        (t.sources ?? []).map((src) => `${t.projectId}|${src.type}|${src.id}`)
+      )
+    )
+    for (const i of inbox.data?.items ?? [])
+      if (want.has(`${i.projectId}|${i.type}|${i.itemId}`))
+        taskSources[`${i.type}|${i.itemId}`] = i
+  }
   const openItems = (openRes?.data?.items ?? []).filter(
     (i) => i.state === "open"
   )
@@ -115,6 +155,30 @@ export default async function ApprovalsPage({
           </AlertDescription>
         </Alert>
       ) : null}
+      {testing.length || linkedTask ? (
+        <section
+          aria-labelledby="approvals-testing"
+          className="flex flex-col gap-3"
+        >
+          {testing.length ? (
+            <div className="flex flex-col gap-1">
+              <h2 id="approvals-testing" className="text-base font-medium">
+                Zum Testen
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Ein Agent hat geliefert. Bericht, Testschritte und Screenshots
+                im Sheet, dann „Passt“ oder „Klappt nicht“ mit Grund.
+              </p>
+            </div>
+          ) : null}
+          <TestingTasks
+            items={testing}
+            linked={linkedTask}
+            projectNames={names}
+            sourceItems={taskSources}
+          />
+        </section>
+      ) : null}
       <CategoryTabs value={category} params={params} />
       <div className="flex flex-wrap items-center gap-2">
         <UrlFilter
@@ -166,8 +230,8 @@ export default async function ApprovalsPage({
             </h2>
             <p className="text-sm text-muted-foreground">
               Feature Requests und Bewertungen, zu denen der Agent noch nichts
-              vorgeschlagen hat. Du kannst selbst antworten oder sie als
-              erledigt markieren.
+              vorgeschlagen hat. Du kannst selbst antworten, eine Aufgabe
+              erstellen oder sie als erledigt markieren.
             </p>
           </div>
           {openRequests.length ? (

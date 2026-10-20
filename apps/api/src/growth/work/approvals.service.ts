@@ -1156,7 +1156,8 @@ export class ApprovalsService {
             ...(a.kind === "reply" && p.itemId
               ? [
                   {
-                    type: p.target === "featurama" ? "feature_request" : "review",
+                    type:
+                      p.target === "featurama" ? "feature_request" : "review",
                     id: p.itemId,
                   },
                 ]

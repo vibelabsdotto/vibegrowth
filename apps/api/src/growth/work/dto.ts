@@ -99,7 +99,8 @@ export class BacklogPatchDto {
   @IsOptional() @IsString() notionUrl?: string | null
   @IsOptional() @IsString() assignee?: string | null
   /** [{type: feature_request|review, id}], checked in the service */
-  @IsOptional() @IsArray() sources?: { type: "feature_request" | "review"; id: string }[] | null
+  @IsOptional() @IsArray() sources?:
+    { type: "feature_request" | "review"; id: string }[] | null
 }
 
 export class BacklogCreateDto extends BacklogPatchDto {
@@ -110,7 +111,10 @@ export class BacklogCreateDto extends BacklogPatchDto {
 export class TaskCommentDto {
   @IsString() @IsNotEmpty() body!: string
   /** absolute file paths, copied into the data dir */
-  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
   attachments?: string[]
 }
 

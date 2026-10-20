@@ -34,6 +34,7 @@ import type {
   TaskPayload,
 } from "@/lib/growth-types"
 import { cn } from "@/lib/utils"
+import { InboxTasks } from "@/components/app-inbox/inbox-sheet"
 import {
   publishState,
   PublishStateLine,
@@ -305,6 +306,7 @@ function ApprovalDetail({
               }
             >
               <ReplyContext payload={reply} item={context?.item} />
+              {context?.item ? <InboxTasks item={context.item} /> : null}
             </Section>
             {open ? (
               <Field data-invalid={tooLong || empty || undefined}>

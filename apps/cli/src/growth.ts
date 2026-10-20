@@ -834,7 +834,12 @@ export function registerGrowth(program: Command) {
   const backlogPatch = (o: BacklogOpts) => ({
     category: categoryValue(o.category),
     notionUrl: nullable(o.notionUrl),
-    assignee: o.assignee === undefined ? undefined : o.assignee === "none" ? null : o.assignee,
+    assignee:
+      o.assignee === undefined
+        ? undefined
+        : o.assignee === "none"
+          ? null
+          : o.assignee,
     sources: o.sources === undefined ? undefined : parseSources(o.sources),
     title: o.title,
     detail: nullable(o.detail),
@@ -939,9 +944,7 @@ export function registerGrowth(program: Command) {
         api.post("/backlog/release", {
           projectId: o.project,
           version: o.version,
-          ids: o.ids
-            ? o.ids.split(",").map((v) => int(v.trim()))
-            : undefined,
+          ids: o.ids ? o.ids.split(",").map((v) => int(v.trim())) : undefined,
         })
       )
     )

@@ -44,7 +44,12 @@ export const BACKLOG_STATUS = [
 ] as const
 export const ASSIGNEES = ["byte", "hunter", "echo", "max"] as const
 export const TASK_SOURCE_TYPES = ["feature_request", "review"] as const
-export const COMMENT_KINDS = ["comment", "report", "feedback", "accept"] as const
+export const COMMENT_KINDS = [
+  "comment",
+  "report",
+  "feedback",
+  "accept",
+] as const
 
 export interface TaskSource {
   type: (typeof TASK_SOURCE_TYPES)[number]
@@ -179,11 +184,9 @@ export class BacklogService {
       .sort(
         (a, b) => a.projectId.localeCompare(b.projectId) || backlogOrder(a, b)
       )
-    return withCategory(
-      rows,
-      backlogCategory,
-      categoryFilter(f.category)
-    ).map((r) => ({ ...r, sources: parseJson<TaskSource[]>(r.sources, []) }))
+    return withCategory(rows, backlogCategory, categoryFilter(f.category)).map(
+      (r) => ({ ...r, sources: parseJson<TaskSource[]>(r.sources, []) })
+    )
   }
 
   /** Item with its thread (oldest first). */
@@ -297,7 +300,10 @@ export class BacklogService {
     const stamp = nowIso().replace(/[-:]/g, "").replace(/\..*$/, "")
     return files.map((file, i) => {
       if (!path.isAbsolute(file))
-        throw new VGError("INVALID", `Anhang braucht einen absoluten Pfad: ${file}`)
+        throw new VGError(
+          "INVALID",
+          `Anhang braucht einen absoluten Pfad: ${file}`
+        )
       if (!fs.existsSync(file) || !fs.statSync(file).isFile())
         throw new VGError("NOT_FOUND", `Anhang nicht gefunden: ${file}`)
       fs.mkdirSync(dir, { recursive: true })

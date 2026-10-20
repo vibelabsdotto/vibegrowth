@@ -60,7 +60,8 @@ const TASK_FIELDS: FieldSpec[] = [
     label: "Beschreibung",
     type: "textarea",
     rows: 6,
-    placeholder: "Was klappt nicht oder fehlt? Schritte, erwartet, tatsächlich …",
+    placeholder:
+      "Was klappt nicht oder fehlt? Schritte, erwartet, tatsächlich …",
   },
 ]
 
@@ -72,10 +73,13 @@ const DUE_TEXT = {
 } as const
 
 /** Tasks linked to the item and "Aufgabe erstellen". */
-function InboxTasks({ item }: { item: InboxItem }) {
+export function InboxTasks({ item }: { item: InboxItem }) {
   const tasks = item.tasks ?? []
   return (
-    <section aria-labelledby="inbox-sheet-tasks" className="flex flex-col gap-2">
+    <section
+      aria-labelledby="inbox-sheet-tasks"
+      className="flex flex-col gap-2"
+    >
       <div className="flex items-center gap-2">
         <h3 id="inbox-sheet-tasks" className="text-sm font-medium">
           Aufgaben
@@ -112,7 +116,9 @@ function InboxTasks({ item }: { item: InboxItem }) {
         />
       </div>
       {item.replyDue ? (
-        <p className="text-sm text-(--status-warn)">{DUE_TEXT[item.replyDue]}</p>
+        <p className="text-sm text-(--status-warn)">
+          {DUE_TEXT[item.replyDue]}
+        </p>
       ) : null}
       {tasks.length ? (
         <ul className="flex flex-col gap-1.5">
@@ -122,7 +128,7 @@ function InboxTasks({ item }: { item: InboxItem }) {
               className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs"
             >
               <Link
-                href={`/tasks?item=${t.id}`}
+                href={`/approvals?task=${t.id}`}
                 prefetch={false}
                 className="min-w-0 font-medium break-words underline-offset-4 hover:underline"
               >

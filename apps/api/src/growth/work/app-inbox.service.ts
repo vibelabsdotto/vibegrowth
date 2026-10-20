@@ -66,9 +66,13 @@ export function replyDue(
         a.kind === "reply" &&
         !["rejected", "withdrawn"].includes(a.status) &&
         a.createdAt >= ts
-    ) || (!!noReplyAt && noReplyAt >= ts)
+    ) ||
+    (!!noReplyAt && noReplyAt >= ts)
   const latest = (vals: (string | null)[]) =>
-    vals.filter((v): v is string => !!v).sort().pop()!
+    vals
+      .filter((v): v is string => !!v)
+      .sort()
+      .pop()!
   if (active.every((t) => t.releasedAt)) {
     const ts = latest(active.map((t) => t.releasedAt))
     return covered(ts) ? null : "released"

@@ -26,7 +26,12 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
-import type { BacklogDetail, BacklogItem, TaskComment } from "@/lib/growth-types"
+import type {
+  BacklogDetail,
+  BacklogItem,
+  InboxItem,
+  TaskComment,
+} from "@/lib/growth-types"
 import { actorLabel, BACKLOG_KIND_LABEL, fmtDateTime, label } from "./format"
 
 export const ASSIGNEE_LABEL: Record<string, string> = {
@@ -74,7 +79,9 @@ function Comment({ c }: { c: TaskComment }) {
   return (
     <li className="flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{actorLabel(c.actor)}</span>
+        <span className="font-medium text-foreground">
+          {actorLabel(c.actor)}
+        </span>
         <span>{label(COMMENT_LABEL, c.kind)}</span>
         <span>{fmtDateTime(c.createdAt)}</span>
       </div>
@@ -120,13 +127,17 @@ export function TaskSheet({
   onOpenChange,
   onEdit,
   finalFocus,
+  sourceItems = {},
 }: {
   item: BacklogItem | null
   projectName: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onEdit: () => void
+  /** Opens the edit form; without it no edit button (Wartet auf Max) */
+  onEdit?: () => void
   finalFocus: () => HTMLElement | null
+  /** inbox items by `${type}|${id}`, shown inline instead of a link */
+  sourceItems?: Record<string, InboxItem>
 }) {
   // Loaded thread per task id; a different id simply shows the spinner until its load lands.
   const [loaded, setLoaded] = React.useState<{
@@ -220,8 +231,8 @@ export function TaskSheet({
                 {task.title}
               </SheetTitle>
               <SheetDescription>
-                {projectName} · {label(BACKLOG_KIND_LABEL, task.kind)} · angelegt
-                von {actorLabel(task.actor)}
+                {projectName} · {label(BACKLOG_KIND_LABEL, task.kind)} ·
+                angelegt von {actorLabel(task.actor)}
               </SheetDescription>
             </SheetHeader>
             <div
@@ -251,16 +262,18 @@ export function TaskSheet({
                     ausgeliefert
                   </span>
                 ) : null}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto"
-                  onClick={onEdit}
-                >
-                  <Pencil data-icon="inline-start" aria-hidden="true" />
-                  Bearbeiten
-                </Button>
+                {onEdit ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
+                    onClick={onEdit}
+                  >
+                    <Pencil data-icon="inline-start" aria-hidden="true" />
+                    Bearbeiten
+                  </Button>
+                ) : null}
               </div>
               {task.detail ? (
                 <Markdown className="text-sm">{task.detail}</Markdown>
@@ -268,24 +281,50 @@ export function TaskSheet({
               {task.sources?.length ? (
                 <section className="flex flex-col gap-1.5">
                   <h3 className="text-sm font-medium">Anfrage</h3>
-                  <ul className="flex flex-col gap-1 text-sm">
-                    {task.sources.map((s) => (
-                      <li key={`${s.type}:${s.id}`}>
-                        <Link
-                          prefetch={false}
-                          className="underline-offset-4 hover:underline"
-                          href={
-                            s.type === "feature_request"
-                              ? `/feature-requests?filter=all&item=${encodeURIComponent(s.id)}`
-                              : `/reviews?filter=all&item=${encodeURIComponent(s.id)}`
-                          }
-                        >
-                          {s.type === "feature_request"
-                            ? "Feature Request öffnen"
-                            : "Bewertung öffnen"}
-                        </Link>
-                      </li>
-                    ))}
+                  <ul className="flex flex-col gap-2 text-sm">
+                    {task.sources.map((s) => {
+                      const src = sourceItems[`${s.type}|${s.id}`]
+                      if (src) {
+                        const text =
+                          src.type === "feature_request"
+                            ? src.body
+                            : (src.body ?? src.title)
+                        return (
+                          <li
+                            key={`${s.type}:${s.id}`}
+                            className="flex flex-col gap-1 rounded-lg border p-3"
+                          >
+                            <span className="font-medium break-words">
+                              {src.type === "feature_request"
+                                ? src.title
+                                : `Bewertung${src.rating ? ` · ${src.rating} Sterne` : ""}`}
+                            </span>
+                            {text ? (
+                              <p className="line-clamp-8 break-words whitespace-pre-wrap text-muted-foreground">
+                                {text}
+                              </p>
+                            ) : null}
+                          </li>
+                        )
+                      }
+                      return (
+                        <li key={`${s.type}:${s.id}`}>
+                          <Link
+                            prefetch={false}
+                            className="underline-offset-4 hover:underline"
+                            href={
+                              s.type === "feature_request"
+                                ? `/feature-requests?filter=all&item=${encodeURIComponent(s.id)}`
+                                : `/reviews?filter=all&item=${encodeURIComponent(s.id)}`
+                            }
+                          >
+                            {s.type === "feature_request"
+                              ? "Feature Request öffnen"
+                              : "Bewertung öffnen"}
+                          </Link>
+                        </li>
+                      )
+                    })}
                   </ul>
                 </section>
               ) : null}
@@ -309,8 +348,8 @@ export function TaskSheet({
                   </ol>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    Noch kein Bericht. Der zuständige Agent schreibt hier, was er
-                    gemacht hat und wie du es testest.
+                    Noch kein Bericht. Der zuständige Agent schreibt hier, was
+                    er gemacht hat und wie du es testest.
                   </p>
                 )}
               </section>
@@ -342,10 +381,13 @@ export function TaskSheet({
                   disabled={busy !== null}
                   onClick={() => act("comment")}
                 >
-                  {busy === "comment" ? <Spinner data-icon="inline-start" /> : null}
+                  {busy === "comment" ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : null}
                   Notiz speichern
                 </Button>
-                {!closed || (task.status === "done" && !task.releasedVersion) ? (
+                {!closed ||
+                (task.status === "done" && !task.releasedVersion) ? (
                   <Button
                     type="button"
                     variant="outline"

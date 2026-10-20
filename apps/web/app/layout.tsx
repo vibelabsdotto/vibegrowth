@@ -58,7 +58,7 @@ async function navData() {
   const selected = list.some((p) => p.id === chosen) ? chosen : ""
   // Badges follow the project scope of the switcher, like the pages they link to.
   const scope = selected ? `&project=${encodeURIComponent(selected)}` : ""
-  const [pending, inbox] = await Promise.all([
+  const [pending, inbox, testing] = await Promise.all([
     navFetch<unknown[]>(`/approvals?status=pending${scope}`),
     navFetch<{
       counts?: {
@@ -66,12 +66,16 @@ async function navData() {
         reviews?: { byState?: InboxStateCounts }
       }
     }>(`/app/inbox?limit=1${scope}`),
+    navFetch<unknown[]>(`/backlog?status=testing${scope}`),
   ])
   return {
     projects: list,
     selected,
     counts: {
-      pendingApprovals: Array.isArray(pending) ? pending.length : 0,
+      // Wartet auf Max: open approvals plus tasks waiting for "Passt"
+      pendingApprovals:
+        (Array.isArray(pending) ? pending.length : 0) +
+        (Array.isArray(testing) ? testing.length : 0),
       featureRequestsOpen: actionable(inbox?.counts?.featureRequests?.byState),
       reviewsOpen: actionable(inbox?.counts?.reviews?.byState),
     },
