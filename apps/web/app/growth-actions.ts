@@ -5,6 +5,7 @@ import { ApiError, apiFetch } from "@/lib/api"
 import type {
   Approval,
   ApprovalEffect,
+  BacklogDetail,
   BacklogItem,
   Change,
   ContentDetail,
@@ -187,6 +188,13 @@ function backlogFields(v: Values) {
     doneRef: s(v.doneRef),
     category: s(v.category) ?? undefined,
     notionUrl: s(v.notionUrl),
+    // "none" in the select = nobody assigned
+    assignee:
+      v.assignee === undefined
+        ? undefined
+        : s(v.assignee) === "none"
+          ? null
+          : s(v.assignee),
   })
 }
 
@@ -197,8 +205,43 @@ export async function createBacklog(v: Values) {
   })
 }
 
+/** "Aufgabe erstellen" from an inbox item: app task linked to the feature request or review. */
+export async function createInboxTask(
+  source: { projectId: string; type: "feature_request" | "review"; id: string },
+  v: Values
+) {
+  return call<BacklogItem>("/backlog", "POST", {
+    projectId: source.projectId,
+    ...backlogFields(v),
+    category: "app",
+    source: "max",
+    sources: [{ type: source.type, id: source.id }],
+  })
+}
+
 export async function updateBacklog(id: number, v: Values) {
   return call<BacklogItem>(`/backlog/${id}`, "PATCH", backlogFields(v))
+}
+
+/** Task with its thread, for the task sheet (read only, no revalidation). */
+export async function loadTask(id: number) {
+  return call<BacklogDetail>(`/backlog/${id}`, "GET", undefined, false)
+}
+
+export async function commentTask(id: number, body: string) {
+  return call<BacklogDetail>(`/backlog/${id}/comments`, "POST", { body })
+}
+
+/** "Passt" */
+export async function acceptTask(id: number, body?: string) {
+  return call<BacklogDetail>(`/backlog/${id}/accept`, "POST", {
+    body: body?.trim() || null,
+  })
+}
+
+/** "Klappt nicht" with the reason */
+export async function reopenTask(id: number, body: string) {
+  return call<BacklogDetail>(`/backlog/${id}/reopen`, "POST", { body })
 }
 
 // ---------- changes, experiments ----------

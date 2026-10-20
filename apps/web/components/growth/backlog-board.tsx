@@ -1,7 +1,15 @@
 "use client"
 
 import * as React from "react"
-import { Circle, CircleCheck, CircleDot, CircleX, Plus } from "lucide-react"
+import { usePathname, useSearchParams } from "next/navigation"
+import {
+  Circle,
+  CircleCheck,
+  CircleDot,
+  CircleX,
+  FlaskConical,
+  Plus,
+} from "lucide-react"
 import { createBacklog, updateBacklog } from "@/app/growth-actions"
 import { FormDrawer, type FieldSpec } from "@/components/form-drawer"
 import { Badge } from "@/components/ui/badge"
@@ -12,6 +20,7 @@ import { cn } from "@/lib/utils"
 import { CategoryLabel } from "./category"
 import { actorLabel, BACKLOG_KIND_LABEL, label } from "./format"
 import { GroupedList, type GroupDef } from "./grouped-list"
+import { ASSIGNEE_LABEL, TaskSheet } from "./task-sheet"
 
 export const BACKLOG_GROUPS: GroupDef[] = [
   {
@@ -21,6 +30,12 @@ export const BACKLOG_GROUPS: GroupDef[] = [
     icon: Circle,
   },
   { key: "doing", label: "In Arbeit", icon: CircleDot, tone: "warn" },
+  {
+    key: "testing",
+    label: "Zum Testen",
+    description: "Agent hat geliefert, wartet auf „Passt“ oder „Klappt nicht“",
+    icon: FlaskConical,
+  },
   {
     key: "done",
     label: "Erledigt",
@@ -59,6 +74,18 @@ const fields: FieldSpec[] = [
     label: "Bereich",
     type: "select",
     options: CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] })),
+  },
+  {
+    name: "assignee",
+    label: "Zuständig",
+    type: "select",
+    options: [
+      { value: "none", label: "Niemand" },
+      ...Object.entries(ASSIGNEE_LABEL).map(([value, l]) => ({
+        value,
+        label: l,
+      })),
+    ],
   },
   { name: "impact", label: "Impact", type: "select", options: levelOptions },
   { name: "effort", label: "Aufwand", type: "select", options: levelOptions },
@@ -116,11 +143,30 @@ export function BacklogBoard({
   /** Bereich from the page filter, preset for new tasks ("" = alle). */
   category?: string
 }) {
+  // Open task in ?item=<id> (history.replaceState, like the inbox sheets): deep-linkable.
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const raw = searchParams.get("item")
+  const sheetId = raw && /^\d+$/.test(raw) ? Number(raw) : null
+  const setSheetId = (id: number | null) => {
+    const next = new URLSearchParams(searchParams.toString())
+    if (id !== null) next.set("item", String(id))
+    else next.delete("item")
+    const qs = next.toString()
+    window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname)
+  }
   const [openId, setOpenId] = React.useState<number | null>(null)
   const [snapshot, setSnapshot] = React.useState<BacklogItem | null>(null)
   const opener = React.useRef<HTMLElement | null>(null)
   const name = (id: string) => projects.find((p) => p.id === id)?.name ?? id
   const current = items.find((i) => i.id === openId) ?? snapshot
+  const sheetCurrent = items.find((i) => i.id === sheetId) ?? null
+  // Keep the last task rendered while the sheet animates out.
+  const [sheetShown, setSheetShown] = React.useState<BacklogItem | null>(
+    sheetCurrent
+  )
+  if (sheetCurrent && sheetCurrent !== sheetShown) setSheetShown(sheetCurrent)
+  const sheetItem = sheetCurrent ?? sheetShown
   const sorted = React.useMemo(() => [...items].sort(order), [items])
 
   return (
@@ -141,6 +187,16 @@ export function BacklogBoard({
             ) : null}
             {!category ? <CategoryLabel category={b.category} /> : null}
             <span>{label(BACKLOG_KIND_LABEL, b.kind)}</span>
+            {b.assignee ? (
+              <Badge variant="secondary">
+                {label(ASSIGNEE_LABEL, b.assignee)}
+              </Badge>
+            ) : null}
+            {b.releasedVersion ? (
+              <span className="text-muted-foreground">
+                in {b.releasedVersion}
+              </span>
+            ) : null}
             <Level name="Impact" value={b.impact} />
             <Level name="Aufwand" value={b.effort} />
           </>
@@ -149,7 +205,7 @@ export function BacklogBoard({
         onOpen={(b, el) => {
           opener.current = el
           setSnapshot(b)
-          setOpenId(b.id)
+          setSheetId(b.id)
         }}
         toolbar={
           <FormDrawer
@@ -173,6 +229,7 @@ export function BacklogBoard({
               project: project || projects[0]?.id || "",
               category: category || "web",
               kind: category === "app" ? "feature" : "seo",
+              assignee: category === "app" ? "byte" : "none",
               impact: "2",
               effort: "2",
               source: "max",
@@ -188,6 +245,21 @@ export function BacklogBoard({
             )}
           />
         }
+      />
+      <TaskSheet
+        item={sheetItem}
+        projectName={sheetItem ? name(sheetItem.projectId) : ""}
+        open={sheetCurrent !== null}
+        onOpenChange={(o) => {
+          if (!o) setSheetId(null)
+        }}
+        finalFocus={() => opener.current}
+        onEdit={() => {
+          if (!sheetItem) return
+          setSnapshot(sheetItem)
+          setSheetId(null)
+          setOpenId(sheetItem.id)
+        }}
       />
       {current ? (
         <FormDrawer
@@ -213,6 +285,7 @@ export function BacklogBoard({
             source: current.source ?? "",
             doneRef: current.doneRef ?? "",
             notionUrl: current.notionUrl ?? "",
+            assignee: current.assignee ?? "none",
           }}
           successMessage="Aufgabe gespeichert"
           action={(v) => {

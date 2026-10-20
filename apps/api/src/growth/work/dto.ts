@@ -97,11 +97,35 @@ export class BacklogPatchDto {
   @IsOptional() @IsInt() position?: number
   @IsOptional() @IsString() category?: string | null
   @IsOptional() @IsString() notionUrl?: string | null
+  @IsOptional() @IsString() assignee?: string | null
+  /** [{type: feature_request|review, id}], checked in the service */
+  @IsOptional() @IsArray() sources?: { type: "feature_request" | "review"; id: string }[] | null
 }
 
 export class BacklogCreateDto extends BacklogPatchDto {
   @IsString() @IsNotEmpty() projectId!: string
   @IsOptional() @IsString() sourceKey?: string | null
+}
+
+export class TaskCommentDto {
+  @IsString() @IsNotEmpty() body!: string
+  /** absolute file paths, copied into the data dir */
+  @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true })
+  attachments?: string[]
+}
+
+export class TaskReportDto extends TaskCommentDto {
+  @IsOptional() @IsString() doneRef?: string | null
+}
+
+export class TaskAcceptDto {
+  @IsOptional() @IsString() body?: string | null
+}
+
+export class BacklogReleaseDto {
+  @IsString() @IsNotEmpty() projectId!: string
+  @IsString() @IsNotEmpty() version!: string
+  @IsOptional() @IsArray() @IsInt({ each: true }) ids?: number[]
 }
 
 // ---------- experiments & changes ----------

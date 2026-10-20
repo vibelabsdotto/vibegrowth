@@ -12,6 +12,7 @@ import {
 } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
 import { ApprovalsService, noReplyActive } from "./approvals.service"
+import { BacklogService, type backlogOut } from "./backlog.service"
 import { listOf, oneOf, requireProject } from "./shared"
 
 export const INBOX_TYPES = ["feature_request", "review"] as const
@@ -38,9 +39,56 @@ interface LinkedApproval {
   kind: string
   status: string
   title: string
+  createdAt: string
   published: unknown
   publish: unknown
 }
+
+type LinkedTask = ReturnType<typeof backlogOut>
+
+/** Follow-up reply a linked task makes due (contract §7.8). */
+export type ReplyDue = "accepted" | "released"
+
+/**
+ * accepted: every active linked task is confirmed ("Passt"), released: every one shipped. Due until
+ * a reply (not rejected/withdrawn) or a no-reply decision exists from after that moment.
+ */
+export function replyDue(
+  tasks: LinkedTask[],
+  linked: LinkedApproval[],
+  noReplyAt: string | null
+): ReplyDue | null {
+  const active = tasks.filter((t) => t.status !== "dropped")
+  if (!active.length) return null
+  const covered = (ts: string) =>
+    linked.some(
+      (a) =>
+        a.kind === "reply" &&
+        !["rejected", "withdrawn"].includes(a.status) &&
+        a.createdAt >= ts
+    ) || (!!noReplyAt && noReplyAt >= ts)
+  const latest = (vals: (string | null)[]) =>
+    vals.filter((v): v is string => !!v).sort().pop()!
+  if (active.every((t) => t.releasedAt)) {
+    const ts = latest(active.map((t) => t.releasedAt))
+    return covered(ts) ? null : "released"
+  }
+  if (active.every((t) => t.acceptedAt)) {
+    const ts = latest(active.map((t) => t.acceptedAt))
+    return covered(ts) ? null : "accepted"
+  }
+  return null
+}
+
+const taskBrief = (t: LinkedTask) => ({
+  id: t.id,
+  title: t.title,
+  kind: t.kind,
+  status: t.status,
+  assignee: t.assignee,
+  acceptedAt: t.acceptedAt,
+  releasedVersion: t.releasedVersion,
+})
 
 /**
  * App inbox: Featurama requests (feature_requests) and store reviews with reply status. Written by
@@ -50,7 +98,8 @@ interface LinkedApproval {
 export class AppInboxService {
   constructor(
     private readonly database: DatabaseService,
-    private readonly approvalsService: ApprovalsService
+    private readonly approvalsService: ApprovalsService,
+    private readonly backlog: BacklogService
   ) {}
 
   private get ctx() {
@@ -201,6 +250,7 @@ export class AppInboxService {
           kind: a.kind,
           status: a.status,
           title: a.title,
+          createdAt: a.createdAt,
           published: p.published ?? null,
           publish: p.publish ?? null,
         },
@@ -301,6 +351,10 @@ export class AppInboxService {
       ]),
     ]
     const links = this.linked(projectIds)
+    const taskLinks = this.backlog.linkedToInbox(projectIds)
+    /** A due follow-up reopens answered/no_reply items; proposals and approved replies stay. */
+    const withDue = (state: InboxState, due: ReplyDue | null): InboxState =>
+      due && ["open", "answered", "no_reply"].includes(state) ? "open" : state
     const refs = new Map<string, string | null>()
     const storeRef = (
       projectId: string,
@@ -324,8 +378,14 @@ export class AppInboxService {
         // (state open, needsReply false).
         const linked =
           links.get(`${r.projectId}|feature_request|${r.requestId}`) ?? []
-        const state = this.state(r.needsReply, r, r.lastUserCommentAt, linked)
-        const needs = state === "open" && r.approved
+        const tasks =
+          taskLinks.get(`${r.projectId}|feature_request|${r.requestId}`) ?? []
+        const due = replyDue(tasks, linked, r.noReplyAt)
+        const state = withDue(
+          this.state(r.needsReply, r, r.lastUserCommentAt, linked),
+          due
+        )
+        const needs = state === "open" && (r.approved || !!due)
         items.push({
           type: "feature_request",
           target: "featurama",
@@ -341,12 +401,19 @@ export class AppInboxService {
               .sort()
               .pop() ?? r.createdAt,
           approvals: linked,
+          tasks: tasks.map(taskBrief),
+          replyDue: due,
         })
       }
     if (type !== "feature_request")
       for (const r of textReviews) {
         const linked = links.get(`${r.projectId}|review|${r.reviewId}`) ?? []
-        const state = this.state(r.needsReply, r, r.lastModified, linked)
+        const tasks = taskLinks.get(`${r.projectId}|review|${r.reviewId}`) ?? []
+        const due = replyDue(tasks, linked, r.noReplyAt)
+        const state = withDue(
+          this.state(r.needsReply, r, r.lastModified, linked),
+          due
+        )
         const store = r.store as "google_play" | "app_store"
         items.push({
           type: "review",
@@ -361,6 +428,8 @@ export class AppInboxService {
             [r.lastModified, r.replyAt, r.date].filter(Boolean).sort().pop() ??
             r.createdAt,
           approvals: linked,
+          tasks: tasks.map(taskBrief),
+          replyDue: due,
         })
       }
     const rank = (s: InboxState) =>

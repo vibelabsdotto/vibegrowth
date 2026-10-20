@@ -22,6 +22,10 @@ import {
   ApprovalDecideDto,
   BacklogCreateDto,
   BacklogPatchDto,
+  BacklogReleaseDto,
+  TaskAcceptDto,
+  TaskCommentDto,
+  TaskReportDto,
   ChangeCreateDto,
   ContentCreateDto,
   ContentPatchDto,
@@ -141,9 +145,16 @@ export class BacklogController {
     @Query("project") project?: string,
     @Query("status") status?: string,
     @Query("kind") kind?: string,
-    @Query("category") category?: string
+    @Query("category") category?: string,
+    @Query("assignee") assignee?: string
   ) {
-    return this.backlog.list({ project, status, kind, category })
+    return this.backlog.list({ project, status, kind, category, assignee })
+  }
+
+  @Post("release")
+  @HttpCode(200)
+  release(@Body() body: BacklogReleaseDto, @Actor() actor: string) {
+    return this.backlog.release(body, actor)
   }
 
   @Get(":id")
@@ -154,6 +165,45 @@ export class BacklogController {
   @Post()
   add(@Body() body: BacklogCreateDto, @Actor() actor: string) {
     return this.backlog.add({ ...body, title: body.title ?? "" }, actor)
+  }
+
+  @Post(":id/comments")
+  comment(
+    @Param("id") id: string,
+    @Body() body: TaskCommentDto,
+    @Actor() actor: string
+  ) {
+    return this.backlog.comment(idParam(id, "Backlog-Eintrag"), body, actor)
+  }
+
+  @Post(":id/report")
+  @HttpCode(200)
+  report(
+    @Param("id") id: string,
+    @Body() body: TaskReportDto,
+    @Actor() actor: string
+  ) {
+    return this.backlog.report(idParam(id, "Backlog-Eintrag"), body, actor)
+  }
+
+  @Post(":id/accept")
+  @HttpCode(200)
+  accept(
+    @Param("id") id: string,
+    @Body() body: TaskAcceptDto,
+    @Actor() actor: string
+  ) {
+    return this.backlog.accept(idParam(id, "Backlog-Eintrag"), body, actor)
+  }
+
+  @Post(":id/reopen")
+  @HttpCode(200)
+  reopen(
+    @Param("id") id: string,
+    @Body() body: TaskCommentDto,
+    @Actor() actor: string
+  ) {
+    return this.backlog.reopen(idParam(id, "Backlog-Eintrag"), body, actor)
   }
 
   @Patch(":id")

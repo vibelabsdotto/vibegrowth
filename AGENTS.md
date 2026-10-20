@@ -14,11 +14,11 @@ Verbindlich: `docs/CONTRACT.md` (Endpunkte, Body-Feldnamen, Schema, CLI-Kompatib
 | `apps/api/src/common/` | `@Actor()` (Header `X-Actor`, Default `agent`), JSON-Exception-Filter |
 | `apps/api/src/shorts/` | Shorts-Controller, rufen `core/` direkt; Antworten byte-gleich zur alten CLI |
 | `apps/api/src/growth/data/` | Projekte, Kanäle, Collector-Schalter, `collect`, KPI, Suche, Audit, Funnel, Collector-Aktionen (Sitemap, Bing, Keywords, GA4-Setup, Store-Check, `geo run`) |
-| `apps/api/src/growth/work/` | Freigaben (inkl. `reply`/`task`), Content, Backlog, Experimente, Changes, GEO, Erwähnungs-Ziele, Store, Strategien, Wissen (`/knowledge`), App-Inbox und `app publish`, Übersicht, `context --project` |
+| `apps/api/src/growth/work/` | Freigaben (inkl. `reply`/`task`), Content, Backlog (mit Verlauf `task_comments`, `report`/`accept`/`reopen`/`release`), Experimente, Changes, GEO, Erwähnungs-Ziele, Store, Strategien, Wissen (`/knowledge`), App-Inbox und `app publish`, Übersicht, `context --project` |
 | `apps/api/src/core/category.ts` | Kategorien `web\|shortform\|app\|general` und ihre Ableitung (Kontrakt §7.9) |
 | `apps/api/src/growth/import/` | `import-growth` aus dem Website-Growth-System |
 | `apps/api/src/collectors/` | `definitions/` (ein Collector pro Datei), `sources/` (Abruf), `registry.ts` |
-| `apps/api/drizzle/` | SQL-Migrationen `0000`–`0007` + `meta/` |
+| `apps/api/drizzle/` | SQL-Migrationen `0000`–`0008` + `meta/` |
 | `apps/api/renderer/` | Python-Renderer, TikTok-Zahlen-Abruf, OFL-Fonts |
 | `apps/web/` | Next.js-App, Port 4310, nur über die API. Eigene Regeln in `apps/web/AGENTS.md` |
 | `apps/cli/` | Commander-CLI, HTTP-Client der API, gebündelt nach `dist/cli.mjs`; bins `vibegrowth` und Alias `vibeshorts` |

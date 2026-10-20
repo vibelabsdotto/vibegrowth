@@ -1,13 +1,25 @@
+import fs from "node:fs"
+import path from "node:path"
 import { Injectable } from "@nestjs/common"
-import { and, eq, inArray, type SQL } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, type SQL } from "drizzle-orm"
 import {
   backlogCategory,
   categoryFilter,
   categoryInput,
   withCategory,
 } from "../../core/category"
-import { backlogItems } from "../../core/schema"
-import { getById, patchRow, recordHistory, VGError } from "../../core/util"
+import { resolveInDataDir } from "../../core/config"
+import { backlogItems, taskComments } from "../../core/schema"
+import {
+  getById,
+  isMax,
+  json,
+  nowIso,
+  parseJson,
+  patchRow,
+  recordHistory,
+  VGError,
+} from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
 import { listOf, oneOf, requireProject } from "./shared"
 
@@ -22,7 +34,22 @@ export const BACKLOG_KINDS = [
   "ux",
   "other",
 ] as const
-export const BACKLOG_STATUS = ["open", "doing", "done", "dropped"] as const
+/** testing = the assignee reported a result, max checks it ("Passt" → done, "Klappt nicht" → open). */
+export const BACKLOG_STATUS = [
+  "open",
+  "doing",
+  "testing",
+  "done",
+  "dropped",
+] as const
+export const ASSIGNEES = ["byte", "hunter", "echo", "max"] as const
+export const TASK_SOURCE_TYPES = ["feature_request", "review"] as const
+export const COMMENT_KINDS = ["comment", "report", "feedback", "accept"] as const
+
+export interface TaskSource {
+  type: (typeof TASK_SOURCE_TYPES)[number]
+  id: string
+}
 
 export type BacklogRow = typeof backlogItems.$inferSelect
 
@@ -40,6 +67,8 @@ export interface BacklogInput {
   sourceKey?: string | null
   category?: string | null
   notionUrl?: string | null
+  assignee?: string | null
+  sources?: TaskSource[] | null
 }
 
 export type BacklogPatch = Partial<
@@ -67,9 +96,53 @@ export function backlogOrder(a: BacklogRow, b: BacklogRow) {
   )
 }
 
-/** Row with its effective category (stored or derived). */
+/** Row with its effective category (stored or derived) and parsed sources. */
 export function backlogOut(r: BacklogRow) {
-  return { ...r, category: backlogCategory(r) }
+  return {
+    ...r,
+    category: backlogCategory(r),
+    sources: parseJson<TaskSource[]>(r.sources, []),
+  }
+}
+
+function assigneeInput(v: string | null | undefined) {
+  if (v === undefined) return undefined
+  if (v === null || v === "" || v === "none") return null
+  return oneOf(v.toLowerCase(), ASSIGNEES, "assignee")
+}
+
+/** [{type, id}] with known types, deduplicated; null/[] = none. */
+export function sourcesInput(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined
+  if (v === null) return null
+  if (!Array.isArray(v))
+    throw new VGError("INVALID", "sources muss eine Liste sein")
+  const seen = new Set<string>()
+  const out: TaskSource[] = []
+  v.forEach((s, i) => {
+    const o = (s ?? {}) as Record<string, unknown>
+    const id =
+      typeof o.id === "number"
+        ? String(o.id)
+        : typeof o.id === "string"
+          ? o.id.trim()
+          : ""
+    if (typeof o.type !== "string" || !id)
+      throw new VGError("INVALID", `sources[${i}] braucht type und id`)
+    const type = oneOf(o.type, TASK_SOURCE_TYPES, `sources[${i}].type`)
+    const key = `${type}|${id}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      out.push({ type, id })
+    }
+  })
+  return out.length ? json(out) : null
+}
+
+export type TaskCommentRow = typeof taskComments.$inferSelect
+
+export function commentOut(c: TaskCommentRow) {
+  return { ...c, attachments: parseJson<string[]>(c.attachments, []) }
 }
 
 @Injectable()
@@ -85,9 +158,15 @@ export class BacklogService {
     status?: string
     kind?: string
     category?: string
+    assignee?: string
   }) {
     const conds: SQL[] = []
     if (f.project) conds.push(eq(backlogItems.projectId, f.project))
+    if (f.assignee === "none") conds.push(isNull(backlogItems.assignee))
+    else {
+      const who = listOf(f.assignee, ASSIGNEES, "assignee")
+      if (who) conds.push(inArray(backlogItems.assignee, who))
+    }
     const statuses = listOf(f.status, BACKLOG_STATUS, "status")
     if (statuses) conds.push(inArray(backlogItems.status, statuses))
     const kinds = listOf(f.kind, BACKLOG_KINDS, "kind")
@@ -100,11 +179,47 @@ export class BacklogService {
       .sort(
         (a, b) => a.projectId.localeCompare(b.projectId) || backlogOrder(a, b)
       )
-    return withCategory(rows, backlogCategory, categoryFilter(f.category))
+    return withCategory(
+      rows,
+      backlogCategory,
+      categoryFilter(f.category)
+    ).map((r) => ({ ...r, sources: parseJson<TaskSource[]>(r.sources, []) }))
   }
 
+  /** Item with its thread (oldest first). */
   get(id: number) {
-    return backlogOut(getById(this.ctx, backlogItems, id, "Backlog-Eintrag"))
+    const row = getById(this.ctx, backlogItems, id, "Backlog-Eintrag")
+    return { ...backlogOut(row), comments: this.comments(id) }
+  }
+
+  comments(id: number) {
+    return this.ctx.db
+      .select()
+      .from(taskComments)
+      .where(eq(taskComments.backlogItemId, id))
+      .orderBy(asc(taskComments.id))
+      .all()
+      .map(commentOut)
+  }
+
+  /** Tasks linked to inbox items of these projects, key `${projectId}|${type}|${id}`. */
+  linkedToInbox(projectIds: string[]) {
+    const byItem = new Map<string, ReturnType<typeof backlogOut>[]>()
+    if (!projectIds.length) return byItem
+    const rows = this.ctx.db
+      .select()
+      .from(backlogItems)
+      .where(inArray(backlogItems.projectId, projectIds))
+      .all()
+    for (const r of rows) {
+      if (!r.sources) continue
+      const out = backlogOut(r)
+      for (const src of out.sources) {
+        const key = `${r.projectId}|${src.type}|${src.id}`
+        byItem.set(key, [...(byItem.get(key) ?? []), out])
+      }
+    }
+    return byItem
   }
 
   add(input: BacklogInput, actor: string) {
@@ -130,6 +245,8 @@ export class BacklogService {
           sourceKey: input.sourceKey ?? null,
           category: categoryInput(input.category) ?? null,
           notionUrl: input.notionUrl ?? null,
+          assignee: assigneeInput(input.assignee) ?? null,
+          sources: sourcesInput(input.sources) ?? null,
         })
         .returning()
         .get()
@@ -164,9 +281,206 @@ export class BacklogService {
         if (p[k] !== undefined) patch[k] = p[k]
       if (p.position !== undefined) patch.position = p.position
       if (p.category !== undefined) patch.category = categoryInput(p.category)
+      if (p.assignee !== undefined) patch.assignee = assigneeInput(p.assignee)
+      if (p.sources !== undefined) patch.sources = sourcesInput(p.sources)
       return backlogOut(
         patchRow(ctx, backlogItems, "backlog", id, patch, actor)
       )
+    })
+  }
+
+  /** Copy files into <dataDir>/growth/tasks/<id>/ and return their relative paths. */
+  private storeAttachments(id: number, files: string[]) {
+    const dataDir = this.ctx.config.dataDir
+    const rel = path.join("growth", "tasks", String(id))
+    const dir = resolveInDataDir(dataDir, rel)
+    const stamp = nowIso().replace(/[-:]/g, "").replace(/\..*$/, "")
+    return files.map((file, i) => {
+      if (!path.isAbsolute(file))
+        throw new VGError("INVALID", `Anhang braucht einen absoluten Pfad: ${file}`)
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile())
+        throw new VGError("NOT_FOUND", `Anhang nicht gefunden: ${file}`)
+      fs.mkdirSync(dir, { recursive: true })
+      const name = `${stamp}-${i + 1}-${path.basename(file).replace(/[^\w.-]+/g, "_")}`
+      fs.copyFileSync(file, path.join(dir, name))
+      return path.join(rel, name)
+    })
+  }
+
+  private insertComment(
+    id: number,
+    c: { kind: string; body: string; attachments?: string[] },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    const body = c.body?.trim()
+    if (!body) throw new VGError("INVALID", "body fehlt")
+    const files = c.attachments?.length
+      ? this.storeAttachments(id, c.attachments)
+      : []
+    const row = ctx.db
+      .insert(taskComments)
+      .values({
+        backlogItemId: id,
+        kind: oneOf(c.kind, COMMENT_KINDS, "kind"),
+        body,
+        attachments: files.length ? json(files) : null,
+        actor,
+      })
+      .returning()
+      .get()
+    recordHistory(ctx, {
+      actor,
+      entity: "task_comment",
+      entityId: row.id,
+      action: "create",
+      after: row,
+    })
+    return commentOut(row)
+  }
+
+  /** POST /backlog/:id/comments: note in the thread; attachments are absolute file paths. */
+  comment(
+    id: number,
+    c: { body: string; attachments?: string[] },
+    actor: string
+  ) {
+    return this.database.tx(() => {
+      getById(this.ctx, backlogItems, id, "Backlog-Eintrag")
+      this.insertComment(id, { kind: "comment", ...c }, actor)
+      return this.get(id)
+    })
+  }
+
+  /** POST /backlog/:id/report (assignee): result with test steps; status testing, done_ref = commit. */
+  report(
+    id: number,
+    r: { body: string; attachments?: string[]; doneRef?: string | null },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    return this.database.tx(() => {
+      const row = getById(ctx, backlogItems, id, "Backlog-Eintrag")
+      if (row.status === "done" || row.status === "dropped")
+        throw new VGError(
+          "CONFLICT",
+          `Aufgabe ${id} ist bereits ${row.status === "done" ? "erledigt" : "verworfen"}`
+        )
+      this.insertComment(id, { kind: "report", ...r }, actor)
+      const patch: Record<string, unknown> = { status: "testing" }
+      if (r.doneRef !== undefined) patch.doneRef = r.doneRef
+      patchRow(ctx, backlogItems, "backlog", id, patch, actor, "report")
+      return this.get(id)
+    })
+  }
+
+  /** POST /backlog/:id/accept (max): "Passt" → done, accepted_at. */
+  accept(id: number, c: { body?: string | null }, actor: string) {
+    const ctx = this.ctx
+    if (!isMax(actor))
+      throw new VGError("LOCKED", "Nur max bestätigt eine Aufgabe")
+    return this.database.tx(() => {
+      const row = getById(ctx, backlogItems, id, "Backlog-Eintrag")
+      if (row.status === "done" || row.status === "dropped")
+        throw new VGError(
+          "CONFLICT",
+          `Aufgabe ${id} ist bereits ${row.status === "done" ? "erledigt" : "verworfen"}`
+        )
+      this.insertComment(
+        id,
+        { kind: "accept", body: c.body?.trim() || "Passt." },
+        actor
+      )
+      patchRow(
+        ctx,
+        backlogItems,
+        "backlog",
+        id,
+        { status: "done", acceptedAt: nowIso() },
+        actor,
+        "accept"
+      )
+      return this.get(id)
+    })
+  }
+
+  /** POST /backlog/:id/reopen (max): "Klappt nicht" with the reason → open again. */
+  reopen(
+    id: number,
+    c: { body: string; attachments?: string[] },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    if (!isMax(actor))
+      throw new VGError("LOCKED", "Nur max schickt eine Aufgabe zurück")
+    return this.database.tx(() => {
+      const row = getById(ctx, backlogItems, id, "Backlog-Eintrag")
+      if (row.status === "dropped")
+        throw new VGError("CONFLICT", `Aufgabe ${id} ist verworfen`)
+      if (row.releasedVersion)
+        throw new VGError(
+          "CONFLICT",
+          `Aufgabe ${id} ist schon in Version ${row.releasedVersion} ausgeliefert, bitte neue Aufgabe anlegen`
+        )
+      this.insertComment(id, { kind: "feedback", ...c }, actor)
+      patchRow(
+        ctx,
+        backlogItems,
+        "backlog",
+        id,
+        { status: "open", acceptedAt: null },
+        actor,
+        "reopen"
+      )
+      return this.get(id)
+    })
+  }
+
+  /** POST /backlog/release: accepted, not yet shipped tasks of a project get the app version. */
+  release(
+    f: { projectId: string; version: string; ids?: number[] },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    return this.database.tx(() => {
+      const project = requireProject(ctx, f.projectId)
+      const version = f.version?.trim()
+      if (!version) throw new VGError("INVALID", "version fehlt")
+      const rows = ctx.db
+        .select()
+        .from(backlogItems)
+        .where(
+          and(
+            eq(backlogItems.projectId, project.id),
+            eq(backlogItems.status, "done"),
+            isNull(backlogItems.releasedVersion)
+          )
+        )
+        .all()
+        .filter((r) => r.acceptedAt && (!f.ids || f.ids.includes(r.id)))
+      if (f.ids) {
+        const missing = f.ids.filter((i) => !rows.some((r) => r.id === i))
+        if (missing.length)
+          throw new VGError(
+            "INVALID",
+            `Nicht bestätigt oder schon ausgeliefert: ${missing.join(", ")}`
+          )
+      }
+      const at = nowIso()
+      const out = rows.map((r) =>
+        backlogOut(
+          patchRow(
+            ctx,
+            backlogItems,
+            "backlog",
+            r.id,
+            { releasedVersion: version, releasedAt: at },
+            actor,
+            "release"
+          )
+        )
+      )
+      return { project: project.id, version, released: out }
     })
   }
 }

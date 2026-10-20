@@ -679,6 +679,15 @@ export const backlogItems = sqliteTable(
     category: text("category"),
     /** Notion ticket of an app task (bug/feature), set by the agent that created it */
     notionUrl: text("notion_url"),
+    /** byte | hunter | echo | max: who works on the task; null = nobody assigned */
+    assignee: text("assignee"),
+    /** JSON [{type: feature_request|review, id}]: inbox items this task answers */
+    sources: text("sources"),
+    /** ISO time max confirmed the result ("Passt") */
+    acceptedAt: text("accepted_at"),
+    /** app version that shipped the accepted result */
+    releasedVersion: text("released_version"),
+    releasedAt: text("released_at"),
     position: integer("position").notNull().default(0),
     actor: text("actor").notNull(),
     sourceKey: text("source_key").unique(),
@@ -686,6 +695,25 @@ export const backlogItems = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => [index("backlog_items_project_status").on(t.projectId, t.status)]
+)
+
+/** Thread of a task: reports with test steps and screenshots, feedback from max. */
+export const taskComments = sqliteTable(
+  "task_comments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    backlogItemId: integer("backlog_item_id")
+      .notNull()
+      .references(() => backlogItems.id),
+    /** comment | report (agent: done, ready to test) | feedback (max: not ok) | accept */
+    kind: text("kind").notNull().default("comment"),
+    body: text("body").notNull(),
+    /** JSON list of paths relative to the data dir */
+    attachments: text("attachments"),
+    actor: text("actor").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("task_comments_item").on(t.backlogItemId)]
 )
 
 export const geoQuestions = sqliteTable(

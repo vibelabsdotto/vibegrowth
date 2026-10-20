@@ -1,4 +1,5 @@
 /** Growth commands (contract §7.5). Bodies use the camelCase fields of the growth services. */
+import path from "node:path"
 import { Option, type Command } from "commander"
 import {
   api,
@@ -60,6 +61,21 @@ const CONTENT_STATUS = [
   "live",
   "discarded",
 ]
+/** "feature_request:<id>,review:<id>" → [{type, id}]; "" → null. */
+function parseSources(v: string) {
+  const parts = v
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (!parts.length) return null
+  return parts.map((p) => {
+    const i = p.indexOf(":")
+    if (i < 1 || i === p.length - 1)
+      throw new CliError("INVALID", `--sources: erwartet typ:id, war: ${p}`)
+    return { type: p.slice(0, i), id: p.slice(i + 1) }
+  })
+}
+
 const BACKLOG_KIND = [
   "seo",
   "tech",
@@ -71,7 +87,8 @@ const BACKLOG_KIND = [
   "ux",
   "other",
 ]
-const BACKLOG_STATUS = ["open", "doing", "done", "dropped"]
+const BACKLOG_STATUS = ["open", "doing", "testing", "done", "dropped"]
+const ASSIGNEES = ["byte", "hunter", "echo", "max", "none"]
 const EXP_TARGET = ["page", "post", "store", "other"]
 const EXP_STATUS = ["running", "evaluated", "stopped"]
 const EXP_VERDICT = ["win", "loss", "neutral", "inconclusive"]
@@ -756,6 +773,10 @@ export function registerGrowth(program: Command) {
     .option("--status <list>", `${BACKLOG_STATUS.join(", ")}, kommagetrennt`)
     .option("--kind <list>", `${BACKLOG_KIND.join(", ")}, kommagetrennt`)
     .option("--category <list>", CATEGORY_HELP)
+    .option(
+      "--assignee <list>",
+      "byte, hunter, echo, max, none (niemand), kommagetrennt"
+    )
     .action(
       run(
         (o: {
@@ -763,15 +784,21 @@ export function registerGrowth(program: Command) {
           status?: string
           kind?: string
           category?: string
+          assignee?: string
         }) =>
           api.get("/backlog", {
             project: o.project,
             status: o.status,
             kind: o.kind,
             category: o.category,
+            assignee: o.assignee,
           })
       )
     )
+  backlogCmd
+    .command("show <id>")
+    .description("Aufgabe mit Verlauf (Berichte, Feedback, Anhänge)")
+    .action(run((id: string) => api.get(`/backlog/${seg(id)}`)))
   function backlogOptions(cmd: Command) {
     return cmd
       .option("--detail <text>")
@@ -783,6 +810,11 @@ export function registerGrowth(program: Command) {
       .option("--position <n>", "", int)
       .addOption(categoryOption())
       .option("--notion-url <url>", "Notion-Ticket (App-Aufgaben)")
+      .addOption(choice("--assignee <who>", ASSIGNEES))
+      .option(
+        "--sources <list>",
+        "Inbox-Quellen, kommagetrennt: feature_request:<id>, review:<id> (leer = keine)"
+      )
   }
   type BacklogOpts = {
     title?: string
@@ -796,10 +828,14 @@ export function registerGrowth(program: Command) {
     position?: number
     category?: string
     notionUrl?: string
+    assignee?: string
+    sources?: string
   }
   const backlogPatch = (o: BacklogOpts) => ({
     category: categoryValue(o.category),
     notionUrl: nullable(o.notionUrl),
+    assignee: o.assignee === undefined ? undefined : o.assignee === "none" ? null : o.assignee,
+    sources: o.sources === undefined ? undefined : parseSources(o.sources),
     title: o.title,
     detail: nullable(o.detail),
     kind: o.kind,
@@ -831,6 +867,84 @@ export function registerGrowth(program: Command) {
       api.patch(`/backlog/${seg(id)}`, backlogPatch(o))
     )
   )
+  const files = (list?: string[]) =>
+    list?.length ? list.map((f) => path.resolve(f)) : undefined
+  const collect = (v: string, prev: string[] = []) => [...prev, v]
+  backlogCmd
+    .command("comment <id>")
+    .description("Notiz in den Verlauf einer Aufgabe")
+    .requiredOption("--body <text>")
+    .option("--attach <file>", "Anhang (Screenshot), mehrfach möglich", collect)
+    .action(
+      run((id: string, o: { body: string; attach?: string[] }) =>
+        api.post(`/backlog/${seg(id)}/comments`, {
+          body: o.body,
+          attachments: files(o.attach),
+        })
+      )
+    )
+  backlogCmd
+    .command("report <id>")
+    .description(
+      "Ergebnis melden: was gemacht wurde, Commit, wie testen; Status testing"
+    )
+    .requiredOption("--body <text>", "Bericht mit Testschritten (Markdown)")
+    .option("--attach <file>", "Screenshot, mehrfach möglich", collect)
+    .option("--done-ref <ref>", "Commit")
+    .action(
+      run(
+        (
+          id: string,
+          o: { body: string; attach?: string[]; doneRef?: string }
+        ) =>
+          api.post(`/backlog/${seg(id)}/report`, {
+            body: o.body,
+            attachments: files(o.attach),
+            doneRef: o.doneRef,
+          })
+      )
+    )
+  backlogCmd
+    .command("accept <id>")
+    .description('"Passt": Aufgabe erledigt (nur max)')
+    .option("--body <text>")
+    .action(
+      run((id: string, o: { body?: string }) =>
+        api.post(`/backlog/${seg(id)}/accept`, { body: o.body })
+      )
+    )
+  backlogCmd
+    .command("reopen <id>")
+    .description('"Klappt nicht": zurück auf open mit Begründung (nur max)')
+    .requiredOption("--body <text>")
+    .option("--attach <file>", "Anhang, mehrfach möglich", collect)
+    .action(
+      run((id: string, o: { body: string; attach?: string[] }) =>
+        api.post(`/backlog/${seg(id)}/reopen`, {
+          body: o.body,
+          attachments: files(o.attach),
+        })
+      )
+    )
+  backlogCmd
+    .command("release")
+    .description(
+      "Bestätigte Aufgaben eines Projekts als ausgeliefert in einer App-Version markieren"
+    )
+    .requiredOption("--project <id>")
+    .requiredOption("--version <v>")
+    .option("--ids <list>", "nur diese Aufgaben, kommagetrennt")
+    .action(
+      run((o: { project: string; version: string; ids?: string }) =>
+        api.post("/backlog/release", {
+          projectId: o.project,
+          version: o.version,
+          ids: o.ids
+            ? o.ids.split(",").map((v) => int(v.trim()))
+            : undefined,
+        })
+      )
+    )
 
   // ---------- experiments & changes ----------
 

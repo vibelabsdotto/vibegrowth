@@ -267,11 +267,46 @@ export type BacklogItem = {
   source: string | null
   doneRef: string | null
   notionUrl?: string | null
+  /** byte | hunter | echo | max, null = niemand */
+  assignee?: string | null
+  /** Inbox items this task answers */
+  sources?: TaskSource[]
+  acceptedAt?: string | null
+  releasedVersion?: string | null
+  releasedAt?: string | null
   position: number
   actor: string
   category?: string
   createdAt?: string
   updatedAt?: string
+}
+
+export type TaskSource = { type: "feature_request" | "review"; id: string }
+
+export type TaskComment = {
+  id: number
+  backlogItemId: number
+  /** comment | report | feedback | accept */
+  kind: string
+  body: string
+  /** paths relative to the data dir, see mediaUrl */
+  attachments: string[]
+  actor: string
+  createdAt: string
+}
+
+/** GET /backlog/:id */
+export type BacklogDetail = BacklogItem & { comments: TaskComment[] }
+
+/** Task linked to an inbox item (GET /app/inbox) */
+export type InboxTask = {
+  id: number
+  title: string
+  kind: string
+  status: string
+  assignee: string | null
+  acceptedAt: string | null
+  releasedVersion: string | null
 }
 
 export type Change = {
@@ -439,6 +474,9 @@ type InboxBase = {
   needsReply: boolean
   lastActivity: string | null
   approvals: InboxApproval[]
+  tasks?: InboxTask[]
+  /** follow-up reply due because linked tasks were accepted or released */
+  replyDue?: "accepted" | "released" | null
   id: number
   projectId: string
   createdAt?: string

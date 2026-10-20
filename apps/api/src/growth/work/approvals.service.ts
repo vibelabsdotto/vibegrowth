@@ -33,7 +33,11 @@ import {
   VGError,
 } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
-import { BacklogService } from "./backlog.service"
+import {
+  BacklogService,
+  TASK_SOURCE_TYPES,
+  type TaskSource,
+} from "./backlog.service"
 import { listOf, oneOf, optOneOf, requireProject } from "./shared"
 import { StrategiesService } from "./strategies.service"
 
@@ -101,6 +105,9 @@ export const REPLY_MAX_LENGTH: Record<ReplyTarget, number> = {
 export const TASK_KINDS = ["bug", "feature", "ux", "store", "other"] as const
 
 /** payload of kind reply (contract §7.8). */
+export const REPLY_STAGES = ["accepted", "released"] as const
+export type ReplyStage = (typeof REPLY_STAGES)[number]
+
 export interface ReplyPayload {
   target: ReplyTarget
   /** Featurama project id, Play package or App Store app id */
@@ -115,6 +122,8 @@ export interface ReplyPayload {
   summary?: string | null
   /** optional next step: created as task on approve (same schema as kind task) */
   task?: TaskPayload
+  /** follow-up on linked tasks: accepted = built and confirmed, released = shipped in a version */
+  stage?: ReplyStage
   /** set by app publish */
   published?: { at: string; ref: string | null; verified: boolean }
   publish?: { state: "stale" | "error"; at: string; reason: string }
@@ -193,6 +202,13 @@ function scale(v: unknown, field: string, fallback: number) {
   if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 3)
     throw new VGError("INVALID", `${field} muss 1, 2 oder 3 sein`)
   return v
+}
+
+/** Inbox sources of a task payload; other source types stay only in the text `source`. */
+function inboxSources(list: { type: string; id: string }[]) {
+  return list.filter((s) =>
+    (TASK_SOURCE_TYPES as readonly string[]).includes(s.type)
+  ) as TaskSource[]
 }
 
 @Injectable()
@@ -393,6 +409,7 @@ export class ApprovalsService {
           "language",
           "summary",
           "task",
+          "stage",
         ].includes(k)
     )
     if (extra.length)
@@ -515,6 +532,8 @@ export class ApprovalsService {
       language,
     }
     if (str(p.summary)) out.summary = str(p.summary)
+    if (p.stage !== undefined && p.stage !== null)
+      out.stage = oneOf(str(p.stage) ?? "", REPLY_STAGES, "payload.stage")
     if (p.task !== undefined && p.task !== null) {
       if (typeof p.task !== "object" || Array.isArray(p.task))
         throw new VGError("INVALID", "payload.task muss ein Objekt sein")
@@ -1133,6 +1152,21 @@ export class ApprovalsService {
           source: [`Freigabe ${a.id}`, ...sources].join(", "),
           category: "app",
           sourceKey,
+          sources: inboxSources([
+            ...(a.kind === "reply" && p.itemId
+              ? [
+                  {
+                    type: p.target === "featurama" ? "feature_request" : "review",
+                    id: p.itemId,
+                  },
+                ]
+              : []),
+            ...(t.sources ?? []),
+          ]),
+          // App bugs and wishes are built by Byte's daily run; the rest stays unassigned.
+          assignee: ["bug", "feature", "ux"].includes(t.kind ?? "")
+            ? "byte"
+            : null,
         },
         actor
       )
