@@ -43,6 +43,10 @@ export const BACKLOG_STATUS = [
   "dropped",
 ] as const
 export const ASSIGNEES = ["byte", "hunter", "echo", "max"] as const
+/** Still in work: an inbox item with such a task waits (state tasks_open, replies held back). */
+export const OPEN_TASK_STATUS = ["open", "doing", "testing"] as const
+export const isOpenTask = (t: { status: string }) =>
+  (OPEN_TASK_STATUS as readonly string[]).includes(t.status)
 export const TASK_SOURCE_TYPES = ["feature_request", "review"] as const
 export const COMMENT_KINDS = [
   "comment",

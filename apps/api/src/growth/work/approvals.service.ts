@@ -35,6 +35,7 @@ import {
 import { DatabaseService } from "../../database/database.service"
 import {
   BacklogService,
+  isOpenTask,
   TASK_SOURCE_TYPES,
   type TaskSource,
 } from "./backlog.service"
@@ -230,7 +231,13 @@ export class ApprovalsService {
     account?: string
     limit?: number
     category?: string
+    /** exclude | only: replies whose inbox item still has open tasks (waitingOn) */
+    waiting?: string
   }) {
+    const waiting =
+      f.waiting === undefined
+        ? undefined
+        : oneOf(f.waiting, ["exclude", "only"] as const, "waiting")
     const conds: SQL[] = []
     if (f.project) conds.push(eq(approvals.projectId, f.project))
     const status = f.status === "all" ? undefined : f.status
@@ -248,7 +255,39 @@ export class ApprovalsService {
       .all()
       .map(approvalOut)
       .filter((a) => !cats || cats.has(a.category))
-    return f.limit ? rows.slice(0, f.limit) : rows
+    const tasks = this.backlog.linkedToInbox([
+      ...new Set(
+        rows.filter((a) => a.kind === "reply").map((a) => a.projectId)
+      ),
+    ])
+    const out = rows
+      .map((a) => {
+        if (a.kind !== "reply") return { ...a, waitingOn: [] as number[] }
+        const p = (a.payload ?? {}) as Partial<ReplyPayload>
+        const type = p.target === "featurama" ? "feature_request" : "review"
+        if (a.status !== "pending") return { ...a, waitingOn: [] as number[] }
+        const linked = (
+          tasks.get(`${a.projectId}|${type}|${p.itemId}`) ?? []
+        ).filter((t) => t.status !== "dropped")
+        // Held back while tasks are open, and for good if the reply predates a task:
+        // the agent proposes a follow-up (replyDue) once the tasks are done.
+        const newest = linked
+          .map((t) => t.createdAt)
+          .sort()
+          .pop()
+        const waitingOn = linked.some(isOpenTask)
+          ? linked.filter(isOpenTask)
+          : newest && a.createdAt < newest
+            ? linked
+            : []
+        return { ...a, waitingOn: waitingOn.map((t) => t.id) }
+      })
+      .filter(
+        (a) =>
+          !waiting ||
+          (waiting === "exclude" ? !a.waitingOn.length : a.waitingOn.length > 0)
+      )
+    return f.limit ? out.slice(0, f.limit) : out
   }
 
   get(id: number) {

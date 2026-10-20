@@ -59,7 +59,7 @@ async function navData() {
   // Badges follow the project scope of the switcher, like the pages they link to.
   const scope = selected ? `&project=${encodeURIComponent(selected)}` : ""
   const [pending, inbox, testing] = await Promise.all([
-    navFetch<unknown[]>(`/approvals?status=pending${scope}`),
+    navFetch<unknown[]>(`/approvals?status=pending&waiting=exclude${scope}`),
     navFetch<{
       counts?: {
         featureRequests?: { byState?: InboxStateCounts }

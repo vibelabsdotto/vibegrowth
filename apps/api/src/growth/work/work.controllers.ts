@@ -63,7 +63,8 @@ export class ApprovalsController {
     @Query("kind") kind?: string,
     @Query("account") account?: string,
     @Query("limit") limit?: string,
-    @Query("category") category?: string
+    @Query("category") category?: string,
+    @Query("waiting") waiting?: string
   ) {
     return this.approvals.list({
       project,
@@ -72,6 +73,7 @@ export class ApprovalsController {
       account,
       limit: intParam(limit, "limit"),
       category,
+      waiting,
     })
   }
 

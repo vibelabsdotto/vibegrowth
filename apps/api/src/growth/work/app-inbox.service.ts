@@ -12,7 +12,7 @@ import {
 } from "../../core/util"
 import { DatabaseService } from "../../database/database.service"
 import { ApprovalsService, noReplyActive } from "./approvals.service"
-import { BacklogService, type backlogOut } from "./backlog.service"
+import { BacklogService, isOpenTask, type backlogOut } from "./backlog.service"
 import { listOf, oneOf, requireProject } from "./shared"
 
 export const INBOX_TYPES = ["feature_request", "review"] as const
@@ -23,6 +23,7 @@ export const INBOX_STATES = [
   "error",
   "stale",
   "approved",
+  "tasks_open",
   "answered",
   "no_reply",
 ] as const
@@ -77,8 +78,11 @@ export function replyDue(
     const ts = latest(active.map((t) => t.releasedAt))
     return covered(ts) ? null : "released"
   }
-  if (active.every((t) => t.acceptedAt)) {
-    const ts = latest(active.map((t) => t.acceptedAt))
+  // done without "Passt" (closed by an agent) counts as accepted at its last change
+  const accepted = (t: LinkedTask) =>
+    t.acceptedAt ?? (t.status === "done" ? t.updatedAt : null)
+  if (active.every((t) => accepted(t))) {
+    const ts = latest(active.map(accepted))
     return covered(ts) ? null : "accepted"
   }
   return null
@@ -356,9 +360,24 @@ export class AppInboxService {
     ]
     const links = this.linked(projectIds)
     const taskLinks = this.backlog.linkedToInbox(projectIds)
-    /** A due follow-up reopens answered/no_reply items; proposals and approved replies stay. */
-    const withDue = (state: InboxState, due: ReplyDue | null): InboxState =>
-      due && ["open", "answered", "no_reply"].includes(state) ? "open" : state
+    /**
+     * Open linked tasks hold the item back (tasks_open: no reply yet, not in Wartet auf Max);
+     * a due follow-up reopens answered/no_reply items; approved replies stay.
+     */
+    const withDue = (
+      state: InboxState,
+      due: ReplyDue | null,
+      tasks: LinkedTask[]
+    ): InboxState => {
+      if (
+        tasks.some(isOpenTask) &&
+        ["open", "proposal", "answered", "no_reply"].includes(state)
+      )
+        return "tasks_open"
+      return due && ["open", "answered", "no_reply"].includes(state)
+        ? "open"
+        : state
+    }
     const refs = new Map<string, string | null>()
     const storeRef = (
       projectId: string,
@@ -387,7 +406,8 @@ export class AppInboxService {
         const due = replyDue(tasks, linked, r.noReplyAt)
         const state = withDue(
           this.state(r.needsReply, r, r.lastUserCommentAt, linked),
-          due
+          due,
+          tasks
         )
         const needs = state === "open" && (r.approved || !!due)
         items.push({
@@ -416,7 +436,8 @@ export class AppInboxService {
         const due = replyDue(tasks, linked, r.noReplyAt)
         const state = withDue(
           this.state(r.needsReply, r, r.lastModified, linked),
-          due
+          due,
+          tasks
         )
         const store = r.store as "google_play" | "app_store"
         items.push({

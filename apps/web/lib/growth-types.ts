@@ -122,6 +122,8 @@ export type ApprovalStatus =
   "pending" | "approved" | "rejected" | "changes_requested" | "withdrawn"
 
 export type Approval = {
+  /** reply: ids of open tasks on its inbox item; the reply waits for them */
+  waitingOn?: number[]
   id: number
   projectId: string
   accountId: string | null
@@ -459,7 +461,14 @@ export type InboxApproval = {
 
 /** Inbox item state (contract §7.8). */
 export type InboxState =
-  "open" | "proposal" | "approved" | "answered" | "no_reply" | "stale" | "error"
+  | "open"
+  | "proposal"
+  | "approved"
+  | "tasks_open"
+  | "answered"
+  | "no_reply"
+  | "stale"
+  | "error"
 
 export type InboxStateCounts = Partial<Record<InboxState, number>>
 

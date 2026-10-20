@@ -56,6 +56,7 @@ const STATE_TONE: Record<InboxState, InboxTone> = {
   open: "warn",
   proposal: "info",
   approved: "good",
+  tasks_open: "info",
   answered: "neutral",
   no_reply: "neutral",
   stale: "warn",

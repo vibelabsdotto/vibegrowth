@@ -518,6 +518,13 @@ export function registerGrowth(program: Command) {
     .option("--account <id>")
     .option("--kind <list>", `${APPROVAL_KIND.join(", ")}, kommagetrennt`)
     .option("--category <list>", CATEGORY_HELP)
+    .addOption(
+      choice(
+        "--waiting <mode>",
+        ["exclude", "only"],
+        "Antworten, die auf offene Aufgaben warten (waitingOn): ausblenden oder nur diese"
+      )
+    )
     .action(
       run(
         (o: {
@@ -526,6 +533,7 @@ export function registerGrowth(program: Command) {
           account?: string
           kind?: string
           category?: string
+          waiting?: string
         }) =>
           api.get("/approvals", {
             status: o.status,
@@ -533,6 +541,7 @@ export function registerGrowth(program: Command) {
             account: o.account,
             kind: o.kind,
             category: o.category,
+            waiting: o.waiting,
           })
       )
     )

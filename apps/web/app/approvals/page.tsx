@@ -58,28 +58,45 @@ export default async function ApprovalsPage({
   const showInbox = !sp.kind && (!category || category === "app")
   const taskId = Number(sp.task)
   const showTasks = !sp.kind
-  const [res, decidedRes, pendingRes, openRes, testingRes] = await Promise.all([
-    load<Approval[]>("/approvals", { ...filter, status: "pending" }),
-    load<Approval[]>("/approvals", { ...filter, status: DECIDED, limit: 15 }),
-    // The note below says what the project filter hides.
-    project ? load<Approval[]>("/approvals", { status: "pending" }) : null,
-    // Inbox items no agent has suggested anything for yet: they must not get lost.
-    showInbox
-      ? load<AppInbox>("/app/inbox", {
-          project: project || undefined,
-          state: "open",
-          limit: 500,
-        })
-      : null,
-    // Tasks an agent delivered: Max says "Passt" or "Klappt nicht".
-    showTasks
-      ? load<BacklogItem[]>("/backlog", {
-          project: project || undefined,
-          category: category || undefined,
-          status: "testing",
-        })
-      : null,
-  ])
+  const [res, decidedRes, pendingRes, openRes, testingRes, waitingRes] =
+    await Promise.all([
+      load<Approval[]>("/approvals", {
+        ...filter,
+        status: "pending",
+        waiting: "exclude",
+      }),
+      load<Approval[]>("/approvals", { ...filter, status: DECIDED, limit: 15 }),
+      // The note below says what the project filter hides.
+      project
+        ? load<Approval[]>("/approvals", {
+            status: "pending",
+            waiting: "exclude",
+          })
+        : null,
+      // Inbox items no agent has suggested anything for yet: they must not get lost.
+      showInbox
+        ? load<AppInbox>("/app/inbox", {
+            project: project || undefined,
+            state: "open",
+            limit: 500,
+          })
+        : null,
+      // Tasks an agent delivered: Max says "Passt" or "Klappt nicht".
+      showTasks
+        ? load<BacklogItem[]>("/backlog", {
+            project: project || undefined,
+            category: category || undefined,
+            status: "testing",
+          })
+        : null,
+      // Replies held back until their tasks are done: only counted here.
+      load<Approval[]>("/approvals", {
+        ...filter,
+        status: "pending",
+        waiting: "only",
+      }),
+    ])
+  const waitingCount = waitingRes.data?.length ?? 0
   const testing = testingRes?.data ?? []
   const linkedTask =
     Number.isInteger(taskId) &&
@@ -218,6 +235,16 @@ export default async function ApprovalsPage({
           }
         />
       )}
+
+      {waitingCount > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {waitingCount === 1
+            ? "1 Antwort wartet"
+            : `${waitingCount} Antworten warten`}{" "}
+          auf Aufgaben. Sind sie erledigt, schlägt der Agent hier eine neue
+          Antwort vor.
+        </p>
+      ) : null}
 
       {openItems.length ? (
         <section

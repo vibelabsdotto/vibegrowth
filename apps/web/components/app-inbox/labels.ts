@@ -11,6 +11,7 @@ export const INBOX_STATE_LABEL: Record<InboxState, string> = {
   open: "offen",
   proposal: "Vorschlag wartet",
   approved: "freigegeben",
+  tasks_open: "Aufgaben offen",
   answered: "beantwortet",
   no_reply: "keine Antwort nötig",
   stale: "veraltet",
