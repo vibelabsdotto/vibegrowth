@@ -66,7 +66,7 @@ async function navData() {
         reviews?: { byState?: InboxStateCounts }
       }
     }>(`/app/inbox?limit=1${scope}`),
-    navFetch<unknown[]>(`/backlog?status=testing${scope}`),
+    navFetch<unknown[]>(`/backlog?status=question,testing${scope}`),
   ])
   return {
     projects: list,

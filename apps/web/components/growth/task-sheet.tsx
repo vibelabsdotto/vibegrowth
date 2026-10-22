@@ -44,6 +44,7 @@ export const ASSIGNEE_LABEL: Record<string, string> = {
 export const TASK_STATUS_LABEL: Record<string, string> = {
   open: "Offen",
   doing: "In Arbeit",
+  question: "Rückfrage",
   testing: "Zum Testen",
   done: "Erledigt",
   dropped: "Verworfen",
@@ -52,6 +53,7 @@ export const TASK_STATUS_LABEL: Record<string, string> = {
 const STATUS_TONE: Record<string, InboxTone> = {
   open: "warn",
   doing: "info",
+  question: "warn",
   testing: "info",
   done: "good",
   dropped: "neutral",
@@ -63,6 +65,7 @@ const mediaUrl = (rel: string) => `/media?path=${encodeURIComponent(rel)}`
 const COMMENT_LABEL: Record<string, string> = {
   report: "Bericht",
   feedback: "Klappt nicht",
+  answer: "Antwort von Max",
   accept: "Passt",
   comment: "Notiz",
 }
@@ -174,6 +177,7 @@ export function TaskSheet({
 
   const task = detail ?? (item ? { ...item, comments: [] } : null)
   const closed = task?.status === "done" || task?.status === "dropped"
+  const question = task?.status === "question"
 
   async function act(kind: Exclude<Busy, null>) {
     if (!task) return
@@ -181,7 +185,9 @@ export function TaskSheet({
     if ((kind === "reopen" || kind === "comment") && !body) {
       setError(
         kind === "reopen"
-          ? "Schreib kurz, was nicht klappt."
+          ? question
+            ? "Die Antwort ist leer."
+            : "Schreib kurz, was nicht klappt."
           : "Die Notiz ist leer."
       )
       return
@@ -206,7 +212,9 @@ export function TaskSheet({
         kind === "accept"
           ? "Aufgabe erledigt"
           : kind === "reopen"
-            ? "Zurück an die Aufgabe"
+            ? question
+              ? "Antwort gesendet"
+              : "Zurück an die Aufgabe"
             : "Notiz gespeichert",
       description:
         kind === "accept" && task.sources?.length
@@ -357,9 +365,11 @@ export function TaskSheet({
             <SheetFooter className="mt-0 flex-col gap-3 border-t">
               <Field data-invalid={error !== null || undefined}>
                 <FieldLabel htmlFor={fieldId}>
-                  {task.status === "testing"
-                    ? "Feedback (bei „Klappt nicht“ nötig)"
-                    : "Notiz"}
+                  {question
+                    ? "Deine Antwort"
+                    : task.status === "testing"
+                      ? "Feedback (bei „Klappt nicht“ nötig)"
+                      : "Notiz"}
                 </FieldLabel>
                 <Textarea
                   id={fieldId}
@@ -367,9 +377,11 @@ export function TaskSheet({
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder={
-                    task.status === "testing"
-                      ? "Was klappt nicht? Schritte, erwartet, tatsächlich …"
-                      : "Hinweis oder Beispiel für den Agent"
+                    question
+                      ? "Entscheidung oder Antwort auf die Rückfrage"
+                      : task.status === "testing"
+                        ? "Was klappt nicht? Schritte, erwartet, tatsächlich …"
+                        : "Hinweis oder Beispiel für den Agent"
                   }
                 />
                 {error ? <FieldError>{error}</FieldError> : null}
@@ -399,10 +411,10 @@ export function TaskSheet({
                     ) : (
                       <RotateCcw data-icon="inline-start" aria-hidden="true" />
                     )}
-                    Klappt nicht
+                    {question ? "Antwort senden" : "Klappt nicht"}
                   </Button>
                 ) : null}
-                {!closed ? (
+                {!closed && !question ? (
                   <Button
                     type="button"
                     disabled={busy !== null}

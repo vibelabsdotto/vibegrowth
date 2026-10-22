@@ -86,7 +86,7 @@ export default async function ApprovalsPage({
         ? load<BacklogItem[]>("/backlog", {
             project: project || undefined,
             category: category || undefined,
-            status: "testing",
+            status: "question,testing",
           })
         : null,
       // Replies held back until their tasks are done: only counted here.
@@ -180,11 +180,13 @@ export default async function ApprovalsPage({
           {testing.length ? (
             <div className="flex flex-col gap-1">
               <h2 id="approvals-testing" className="text-base font-medium">
-                Zum Testen
+                Aufgaben für dich
               </h2>
               <p className="text-sm text-muted-foreground">
-                Ein Agent hat geliefert. Bericht, Testschritte und Screenshots
-                im Sheet, dann „Passt“ oder „Klappt nicht“ mit Grund.
+                Zum Testen: Bericht, Testschritte und Screenshots im Sheet, dann
+                „Passt“ oder „Klappt nicht“ mit Grund. Rückfrage: Der Agent
+                braucht eine Entscheidung, deine Antwort schickt die Aufgabe
+                zurück an ihn.
               </p>
             </div>
           ) : null}

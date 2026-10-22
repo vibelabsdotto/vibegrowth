@@ -87,7 +87,14 @@ const BACKLOG_KIND = [
   "ux",
   "other",
 ]
-const BACKLOG_STATUS = ["open", "doing", "testing", "done", "dropped"]
+const BACKLOG_STATUS = [
+  "open",
+  "doing",
+  "question",
+  "testing",
+  "done",
+  "dropped",
+]
 const ASSIGNEES = ["byte", "hunter", "echo", "max", "none"]
 const EXP_TARGET = ["page", "post", "store", "other"]
 const EXP_STATUS = ["running", "evaluated", "stopped"]

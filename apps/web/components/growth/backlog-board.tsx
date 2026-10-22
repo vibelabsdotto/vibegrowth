@@ -3,6 +3,7 @@
 import * as React from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import {
+  CircleHelp,
   Circle,
   CircleCheck,
   CircleDot,
@@ -30,6 +31,13 @@ export const BACKLOG_GROUPS: GroupDef[] = [
     icon: Circle,
   },
   { key: "doing", label: "In Arbeit", icon: CircleDot, tone: "warn" },
+  {
+    key: "question",
+    label: "Rückfrage",
+    description: "Agent braucht eine Entscheidung oder Antwort von Max",
+    icon: CircleHelp,
+    tone: "warn",
+  },
   {
     key: "testing",
     label: "Zum Testen",

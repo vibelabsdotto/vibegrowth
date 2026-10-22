@@ -10,8 +10,8 @@ import { ASSIGNEE_LABEL, TaskSheet, TaskStatus } from "./task-sheet"
 export const TASK_PARAM = "task"
 
 /**
- * "Zum Testen" on Wartet auf Max: tasks an agent delivered, each opens the task sheet
- * (?task=<id>, also for a linked task outside the list) with "Passt" / "Klappt nicht".
+ * "Aufgaben für dich" on Wartet auf Max: tasks to test or with a question from the agent.
+ * Each opens the task sheet (?task=<id>, also for a linked task outside the list).
  */
 export function TestingTasks({
   items,

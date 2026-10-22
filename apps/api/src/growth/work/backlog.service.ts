@@ -34,17 +34,26 @@ export const BACKLOG_KINDS = [
   "ux",
   "other",
 ] as const
-/** testing = the assignee reported a result, max checks it ("Passt" → done, "Klappt nicht" → open). */
+/**
+ * testing = the assignee reported a result, max checks it ("Passt" → done, "Klappt nicht" → open).
+ * question = the assignee needs a decision or answer from max; his answer sets it back to open.
+ */
 export const BACKLOG_STATUS = [
   "open",
   "doing",
+  "question",
   "testing",
   "done",
   "dropped",
 ] as const
 export const ASSIGNEES = ["byte", "hunter", "echo", "max"] as const
 /** Still in work: an inbox item with such a task waits (state tasks_open, replies held back). */
-export const OPEN_TASK_STATUS = ["open", "doing", "testing"] as const
+export const OPEN_TASK_STATUS = [
+  "open",
+  "doing",
+  "question",
+  "testing",
+] as const
 export const isOpenTask = (t: { status: string }) =>
   (OPEN_TASK_STATUS as readonly string[]).includes(t.status)
 export const TASK_SOURCE_TYPES = ["feature_request", "review"] as const
@@ -52,6 +61,7 @@ export const COMMENT_KINDS = [
   "comment",
   "report",
   "feedback",
+  "answer",
   "accept",
 ] as const
 
@@ -432,7 +442,9 @@ export class BacklogService {
           "CONFLICT",
           `Aufgabe ${id} ist schon in Version ${row.releasedVersion} ausgeliefert, bitte neue Aufgabe anlegen`
         )
-      this.insertComment(id, { kind: "feedback", ...c }, actor)
+      // On a question max answers; otherwise he sends a result back.
+      const kind = row.status === "question" ? "answer" : "feedback"
+      this.insertComment(id, { kind, ...c }, actor)
       patchRow(
         ctx,
         backlogItems,
