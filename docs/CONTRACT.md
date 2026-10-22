@@ -95,7 +95,7 @@ Nur in dieser Schreibweise, ohne `VIBESHORTS_`-Fallback:
 - Statuscodes: POST, das einen Datensatz anlegt (z. B. `/accounts`, `/plan`, `/projects`, `/channels`, `/approvals`, `/content`, `/backlog`, `/experiments`, `/changes`, `/geo/questions`), antwortet mit 201. Aktionen (`/collect`, `/approvals/:id/decide`, `/geo/run`, `/import/growth` …) und alle übrigen Routen mit 200.
 - Response-Bodies im Shorts-Teil sind exakt die Rückgabewerte der Funktionen aus `core/*.ts` am Commit `702c6c5` bzw. das, was `cli/index.ts` dort zusammensetzt (z. B. `accounts show`, `formats show`, `post show`). Logik portieren, nicht neu erfinden.
 - `GET /api/media?path=<rel>` liefert Dateien aus dem Datenordner (Pfad-Guard, Endungs-Allowlist, Range für MP4).
-- Browser-seitig leitet Next per `rewrites` `/api/*` und `/media` an die API weiter.
+- Browser-seitig leiten Route-Handler (`app/api/[...path]`, `app/media`, `lib/forward.ts`) `/api/*` und `/media` zur Laufzeit an die API weiter, keine `rewrites` (die würden die API-URL der Build-Shell einbacken).
 
 ### 4.1 Body-Feldnamen
 
@@ -415,7 +415,7 @@ Agents schlagen Strategien als Freigabe vor: `approvals add --kind strategy` mit
 ## 8. Web (`apps/web`)
 
 - Keine DB, kein `core`-Import. Server Components lesen über die API (serverseitig `VIBEGROWTH_API_URL`), Schreibvorgänge über Server Actions, die die API mit `X-Actor: max` aufrufen und `revalidatePath("/", "layout")`. Rückgabe der Actions `{ok,data}|{ok:false,error}`.
-- `proxy.ts` lehnt fremde Hosts ab. `rewrites`: `/media` und `/api/:path*` → API.
+- `proxy.ts` lehnt fremde Hosts ab. Route-Handler: `/media` und `/api/*` → API, mit eigener Host-Prüfung.
 - Stil: shadcn base-nova, Base UI, Geist, Drawer von rechts, Toasts über `toast.add`. Charts: shadcn `chart` (Recharts), Animationen aus.
 - Navigation (Sidebar-Gruppen nach Bereich, Projekt-Picker oben, Scope im Cookie `vg_project`): Allgemein (Übersicht `/`, Wartet auf Max `/approvals` mit Badge, Aufgaben `/tasks`, Kalender `/calendar`, Experimente & Log `/experiments`, Strategien `/strategies`, Learnings `/learnings`, Entscheidungen `/decisions`, Verlauf `/history`); Web (Content `/content`, Suche & Audit `/search`, GEO `/geo`); App (Feature Requests `/feature-requests`, Bewertungen `/reviews`, beide mit Badge = `state` offen + Vorschlag, Store `/store`, Funnel `/funnel`); Shortform (Posts, Accounts, Hooks, Inspiration). Alle Badges zählen im Projekt-Scope. Weiterleitungen in `proxy.ts`: `/backlog` → `/tasks`, `/formats` → `/strategies?category=shortform`, `/projects/<id>` setzt den Scope und öffnet `/`. Format-Detailseiten bleiben unter `/formats/<id>`.
 - Bereich-Filter: Tabs Alle/Web/Shortform/App/Allgemein (`?category=`, serverseitig an die API) auf Aufgaben, Experimente & Log, Learnings und Entscheidungen (beide über `/knowledge`), Strategien, Wartet auf Max; in Listen ein dezentes Bereich-Label.
