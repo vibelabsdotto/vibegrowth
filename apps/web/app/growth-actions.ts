@@ -89,6 +89,11 @@ export async function decideApproval(
   )
 }
 
+/** Confirmed, not yet carried out reply/other back to pending: Max can change and confirm again. */
+export async function reopenApproval(id: number) {
+  return call<Approval>(`/approvals/${id}/reopen`, "POST", {})
+}
+
 // ---------- app inbox ----------
 
 export type InboxTarget = { project: string; target: string; itemId: string }

@@ -45,6 +45,15 @@ export class ApprovalDecideDto {
   @IsOptional() @IsBoolean() noReply?: boolean | null
 }
 
+export class ApprovalReopenDto {
+  /** New reply text (kind reply) */
+  @IsOptional() @IsString() text?: string | null
+  /** New body (kind other) */
+  @IsOptional() @IsString() body?: string | null
+  /** Why it is open again (shown to Max) */
+  @IsOptional() @IsString() note?: string | null
+}
+
 export class InboxReplyDto {
   @IsString() @IsNotEmpty() project!: string
   @IsString() @IsNotEmpty() target!: string

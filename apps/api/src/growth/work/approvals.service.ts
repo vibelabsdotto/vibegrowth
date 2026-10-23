@@ -39,6 +39,7 @@ import {
   TASK_SOURCE_TYPES,
   type TaskSource,
 } from "./backlog.service"
+import { normLang, replyLanguageProblem, textLanguage } from "./reply-language"
 import { listOf, oneOf, optOneOf, requireProject } from "./shared"
 import { StrategiesService } from "./strategies.service"
 
@@ -159,6 +160,8 @@ export interface InboxItemRef {
   projectRef: string | null
   noReplyLastSeen: string | null
   noReplyAt: string | null
+  /** store review language as stored (null for feature requests) */
+  language: string | null
 }
 
 /** "No reply needed" is active while the item's lastSeen still equals the stored one. */
@@ -671,6 +674,7 @@ export class ApprovalsService {
         projectRef: fr.featuramaProjectId,
         noReplyLastSeen: fr.noReplyLastSeen,
         noReplyAt: fr.noReplyAt,
+        language: null,
       }
     }
     const rv = ctx.db
@@ -697,6 +701,7 @@ export class ApprovalsService {
       projectRef: this.storeRef(projectId, target),
       noReplyLastSeen: rv.noReplyLastSeen,
       noReplyAt: rv.noReplyAt,
+      language: rv.language,
     }
   }
 
@@ -786,7 +791,8 @@ export class ApprovalsService {
       const itemId = str(input.itemId)
       if (!itemId) throw new VGError("INVALID", "itemId fehlt")
       const item = this.inboxItem(project.id, target, itemId)
-      replyText(target, input.text, "text")
+      const ownText = replyText(target, input.text, "text")
+      const language = this.checkLanguage(item, ownText)
       const effects = this.rejectAll(
         this.pendingReplies(project.id, target, itemId),
         "Max hat selbst geantwortet",
@@ -796,6 +802,7 @@ export class ApprovalsService {
         target,
         itemId,
         text: input.text,
+        language,
       })
       const at = nowIso()
       const row = ctx.db
@@ -1014,6 +1021,11 @@ export class ApprovalsService {
           )
         const payload = parseJson<ReplyPayload>(a.payload, {} as ReplyPayload)
         const text = replyText(payload.target, input.text, "text")
+        if (text !== payload.text)
+          this.checkLanguage(
+            this.inboxItem(a.projectId, payload.target, payload.itemId),
+            text
+          )
         // The original text stays in history (before.payload).
         if (text !== payload.text)
           patch.payload = json({ ...payload, text, editedBy: actor })
@@ -1223,6 +1235,90 @@ export class ApprovalsService {
       entity: "backlog",
       id: String(item.id),
       change: existing ? "Aufgabe verknüpft" : "Aufgabe angelegt",
+    })
+  }
+
+  /**
+   * Store replies go out in the review's language: a text in another language is rejected
+   * here (Max sees why), and its detected language is stored. Feature requests: no check.
+   */
+  private checkLanguage(item: InboxItemRef, text: string): string | null {
+    if (item.entity !== "store_review") return null
+    const problem = replyLanguageProblem(item.language, null, text, false)
+    if (problem)
+      throw new VGError(
+        "INVALID",
+        `${problem}. Bitte in der Sprache der Bewertung antworten.`
+      )
+    return textLanguage(text) ?? normLang(item.language)
+  }
+
+  /**
+   * POST /approvals/:id/reopen: a confirmed but not yet carried out reply or other approval
+   * goes back to pending, optionally with a new text (reply: payload.text, other: body), so Max
+   * confirms it again. Published replies stay closed.
+   */
+  reopen(
+    id: number,
+    input: { text?: string | null; body?: string | null; note?: string | null },
+    actor: string
+  ) {
+    const ctx = this.ctx
+    return this.database.tx(() => {
+      const a = getById(ctx, approvals, id, "Freigabe")
+      if (a.status !== "approved")
+        throw new VGError(
+          "CONFLICT",
+          `Freigabe ${id} ist nicht bestätigt (Status ${a.status})`
+        )
+      if (a.kind !== "reply" && a.kind !== "other")
+        throw new VGError(
+          "INVALID",
+          `Wieder öffnen gibt es nur für reply und other, Freigabe ${id} ist ${a.kind}`
+        )
+      const patch: Record<string, unknown> = {
+        status: "pending",
+        decidedBy: null,
+        decidedAt: null,
+        decisionNote: input.note?.trim() || null,
+      }
+      if (a.kind === "reply") {
+        if (input.body !== undefined && input.body !== null)
+          throw new VGError(
+            "INVALID",
+            "body gibt es nur bei other, für reply text"
+          )
+        const p = parseJson<ReplyPayload>(a.payload, {} as ReplyPayload)
+        if (p.published)
+          throw new VGError(
+            "CONFLICT",
+            `Freigabe ${id} ist schon veröffentlicht (${p.published.at})`
+          )
+        const next: ReplyPayload = { ...p }
+        delete next.publish
+        if (input.text !== undefined && input.text !== null) {
+          const text = replyText(p.target, input.text, "text")
+          const item = this.inboxItem(a.projectId, p.target, p.itemId)
+          next.text = text
+          next.language =
+            this.checkLanguage(item, text) ?? next.language ?? null
+          next.editedBy = actor
+        }
+        patch.payload = json(next)
+      } else {
+        if (input.text !== undefined && input.text !== null)
+          throw new VGError(
+            "INVALID",
+            "text gibt es nur bei reply, für other body"
+          )
+        if (input.body !== undefined && input.body !== null) {
+          if (!input.body.trim()) throw new VGError("INVALID", "body ist leer")
+          patch.body = input.body
+        }
+      }
+      return approvalOut(
+        patchRow(ctx, approvals, "approval", id, patch, actor, "reopen")
+      )
     })
   }
 

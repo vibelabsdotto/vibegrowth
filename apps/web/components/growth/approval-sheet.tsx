@@ -6,10 +6,15 @@ import {
   Check,
   CircleCheck,
   MessageSquareOff,
+  PencilLine,
   RotateCcw,
   X,
 } from "lucide-react"
-import { decideApproval, type Decision } from "@/app/growth-actions"
+import {
+  decideApproval,
+  reopenApproval,
+  type Decision,
+} from "@/app/growth-actions"
 import { Markdown } from "@/components/markdown"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -210,6 +215,22 @@ function ApprovalDetail({
   const noteId = React.useId()
   const open = a.status === "pending"
   const busy = pending !== null
+  // Confirmed but not carried out yet: back to pending to change the text.
+  const reopenable =
+    a.status === "approved" &&
+    (a.kind === "other" || (reply !== null && !reply.published))
+  const [reopening, setReopening] = React.useState(false)
+
+  async function reopen() {
+    setReopening(true)
+    setError(null)
+    const res = await reopenApproval(a.id).catch((e: unknown) => ({
+      ok: false as const,
+      error: e instanceof Error ? e.message : String(e),
+    }))
+    setReopening(false)
+    if (!res.ok) setError(res.error)
+  }
 
   const edited = reply !== null && text.trim() !== original.trim()
   const max = reply ? (REPLY_MAX_LENGTH[reply.target] ?? 10000) : 0
@@ -502,6 +523,32 @@ function ApprovalDetail({
               <p className="text-sm break-words whitespace-pre-wrap">
                 Notiz: {a.decisionNote}
               </p>
+            ) : null}
+            {reopenable ? (
+              <div className="flex flex-col items-start gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {a.kind === "reply"
+                    ? "Noch nicht veröffentlicht. Wieder öffnen, um den Text zu ändern; danach neu bestätigen."
+                    : "Wieder öffnen, um es mit einer Notiz neu zu bestätigen oder abzulehnen. Schon Versendetes holt das nicht zurück."}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={reopening}
+                  onClick={reopen}
+                >
+                  {reopening ? (
+                    <Spinner data-icon="inline-start" aria-hidden="true" />
+                  ) : (
+                    <PencilLine data-icon="inline-start" aria-hidden="true" />
+                  )}
+                  Wieder öffnen
+                </Button>
+                {error ? (
+                  <p className="text-sm text-destructive">{error}</p>
+                ) : null}
+              </div>
             ) : null}
           </Section>
         )}

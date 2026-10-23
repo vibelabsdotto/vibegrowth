@@ -20,6 +20,7 @@ import { ContentService } from "./content.service"
 import {
   ApprovalCreateDto,
   ApprovalDecideDto,
+  ApprovalReopenDto,
   BacklogCreateDto,
   BacklogPatchDto,
   BacklogReleaseDto,
@@ -95,6 +96,16 @@ export class ApprovalsController {
     @Actor() actor: string
   ) {
     return this.approvals.decide(idParam(id, "Freigabe"), body, actor)
+  }
+
+  @Post(":id/reopen")
+  @HttpCode(200)
+  reopen(
+    @Param("id") id: string,
+    @Body() body: ApprovalReopenDto,
+    @Actor() actor: string
+  ) {
+    return this.approvals.reopen(idParam(id, "Freigabe"), body, actor)
   }
 
   @Post(":id/withdraw")

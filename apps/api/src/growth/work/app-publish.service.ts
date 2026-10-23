@@ -14,7 +14,7 @@ import {
   playReview,
 } from "../../collectors/sources/reviews"
 import { errorMessage } from "../../collectors/sources/types"
-import { approvals, collectors } from "../../core/schema"
+import { approvals, collectors, storeReviews } from "../../core/schema"
 import {
   getById,
   json,
@@ -27,6 +27,7 @@ import { DatabaseService } from "../../database/database.service"
 import type { ApprovalRow, ReplyPayload } from "./approvals.service"
 import { AppInboxService } from "./app-inbox.service"
 import { ChangesService } from "./changes.service"
+import { replyLanguageProblem } from "./reply-language"
 import { requireProject } from "./shared"
 import { StoreService } from "./store.service"
 
@@ -175,6 +176,18 @@ export class AppPublishService {
       target: p.target,
       itemId: p.itemId,
     }
+    // Store replies only in the review's language, and only with a declared language.
+    const wrongLanguage = this.languageProblem(a.projectId, p)
+    if (wrongLanguage) {
+      if (!dryRun)
+        this.mark(
+          a.id,
+          p,
+          { publish: { state: "error", at: nowIso(), reason: wrongLanguage } },
+          actor
+        )
+      return { ...base, state: "error", reason: wrongLanguage }
+    }
     try {
       const fresh = await this.freshRead(a.projectId, p)
       if (dryRun)
@@ -239,6 +252,25 @@ export class AppPublishService {
         )
       return { ...base, state: "error", reason }
     }
+  }
+
+  private languageProblem(projectId: string, p: ReplyPayload): string | null {
+    if (p.target === "featurama") return null
+    const rv = this.ctx.db
+      .select({ language: storeReviews.language })
+      .from(storeReviews)
+      .where(
+        and(
+          eq(storeReviews.projectId, projectId),
+          eq(storeReviews.store, p.target),
+          eq(storeReviews.reviewId, p.itemId)
+        )
+      )
+      .get()
+    const problem = replyLanguageProblem(rv?.language, p.language, p.text, true)
+    return problem
+      ? `${problem}. Nicht gepostet; Text in der Freigabe ändern (Wieder öffnen).`
+      : null
   }
 
   /** Fresh state of the target: still unanswered and lastSeen unchanged → open. */

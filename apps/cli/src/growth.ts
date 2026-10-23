@@ -674,6 +674,33 @@ export function registerGrowth(program: Command) {
     .command("withdraw <id>")
     .description("Eigene Anfrage zurückziehen")
     .action(run((id: string) => api.post(`/approvals/${seg(id)}/withdraw`)))
+  approvalsCmd
+    .command("reopen <id>")
+    .description(
+      "Bestätigte, noch nicht ausgeführte reply/other wieder auf pending (Max bestätigt neu)"
+    )
+    .option("--text <text>", "neuer Antworttext (reply)")
+    .option("--text-file <datei>", "neuer Antworttext aus Datei, - = stdin")
+    .option("--body-file <datei>", "neuer Text (other), - = stdin")
+    .option("--note <text>", "warum wieder offen (sieht Max)")
+    .action(
+      run(
+        (
+          id: string,
+          o: {
+            text?: string
+            textFile?: string
+            bodyFile?: string
+            note?: string
+          }
+        ) =>
+          api.post(`/approvals/${seg(id)}/reopen`, {
+            text: textOrFile(o.text, o.textFile, "text"),
+            body: textOrFile(undefined, o.bodyFile, "body"),
+            note: o.note,
+          })
+      )
+    )
 
   // ---------- content & backlog ----------
 
@@ -1452,7 +1479,7 @@ export function registerGrowth(program: Command) {
     .option("--needs-reply", "nur, was eine Antwort braucht (state open)")
     .option(
       "--state <list>",
-      "open, proposal, approved, answered, no_reply, stale, error, kommagetrennt"
+      "open, proposal, approved, tasks_open, answered, no_reply, stale, error, kommagetrennt"
     )
     .option("--limit <n>", "Standard 200", int)
     .action(
